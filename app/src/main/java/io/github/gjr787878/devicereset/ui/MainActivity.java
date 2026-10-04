@@ -40,17 +40,22 @@ public class MainActivity extends AppCompatActivity {
     private static final int COLOR_WHITE = 0xFFFFFFFF;
     private static final int COLOR_BLUE = 0xFF0A84FF;
     private static final int COLOR_GRAY = 0xFFCCCCCC;
-    private static final int COLOR_DARK_BG = 0xFF000000;
     private static final int COLOR_DIALOG_BG = 0xFF1C1C1E;
 
     private String currentLang;
     private FrameLayout contentFrame;
     private Button navApps, navSettings;
-    private View appsView, settingsView;
     private LinearLayout appListContainer;
     private TextView appCountText;
     private GlassButtonDrawable[] hookGlass = new GlassButtonDrawable[7];
     private TextView[] hookTv = new TextView[7];
+
+    // ===== 三语字符串 =====
+    private String t(String zh, String en, String ru) {
+        if (LANG_ZH.equals(currentLang)) return zh;
+        if (LANG_RU.equals(currentLang)) return ru;
+        return en;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,7 +69,7 @@ public class MainActivity extends AppCompatActivity {
     private void buildRootUI() {
         float d = getResources().getDisplayMetrics().density;
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(COLOR_DARK_BG);
+        root.setBackgroundColor(0xFF000000);
 
         contentFrame = new FrameLayout(this);
         FrameLayout.LayoutParams contentLp = new FrameLayout.LayoutParams(
@@ -89,8 +94,8 @@ public class MainActivity extends AppCompatActivity {
         navLp.bottomMargin = Math.round(16 * d);
         root.addView(navBar, navLp);
 
-        navApps = makeNavButton("Apps");
-        navSettings = makeNavButton("Settings");
+        navApps = makeNavButton();
+        navSettings = makeNavButton();
         LinearLayout.LayoutParams navBtnLp = new LinearLayout.LayoutParams(
                 0, Math.round(48 * d), 1f);
         navBtnLp.leftMargin = Math.round(4 * d);
@@ -99,15 +104,11 @@ public class MainActivity extends AppCompatActivity {
         navBar.addView(navSettings, navBtnLp);
 
         setContentView(root);
-        appsView = buildAppsPage();
-        settingsView = buildSettingsPage();
-        contentFrame.addView(appsView);
         switchTab(0);
     }
 
-    private Button makeNavButton(String text) {
+    private Button makeNavButton() {
         Button b = new Button(this);
-        b.setText(text);
         b.setTextSize(15);
         b.setAllCaps(false);
         b.setBackgroundColor(Color.TRANSPARENT);
@@ -117,18 +118,19 @@ public class MainActivity extends AppCompatActivity {
     private void switchTab(int idx) {
         boolean isApps = idx == 0;
         contentFrame.removeAllViews();
-        contentFrame.addView(isApps ? appsView : settingsView);
+        contentFrame.addView(isApps ? buildAppsPage() : buildSettingsPage());
         float d = getResources().getDisplayMetrics().density;
         GradientDrawable selBg = new GradientDrawable();
         selBg.setColor(0x330A84FF);
         selBg.setCornerRadius(20 * d);
+        navApps.setText(t("应用", "Apps", "Приложения"));
+        navSettings.setText(t("设置", "Settings", "Настройки"));
         navApps.setTextColor(isApps ? COLOR_BLUE : COLOR_WHITE);
         navSettings.setTextColor(isApps ? COLOR_WHITE : COLOR_BLUE);
         navApps.setBackground(isApps ? selBg : null);
         navSettings.setBackground(isApps ? null : selBg);
         navApps.setOnClickListener(v -> switchTab(0));
         navSettings.setOnClickListener(v -> switchTab(1));
-        if (isApps) refreshAppList();
     }
 
     // ===== 应用页 =====
@@ -140,7 +142,7 @@ public class MainActivity extends AppCompatActivity {
         ll.setPadding(Math.round(24 * d), Math.round(48 * d), Math.round(24 * d), Math.round(32 * d));
 
         TextView title = new TextView(this);
-        title.setText("Select App");
+        title.setText(t("选择应用", "Select App", "Выберите приложение"));
         title.setTextSize(28);
         title.setTextColor(COLOR_WHITE);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
@@ -164,20 +166,22 @@ public class MainActivity extends AppCompatActivity {
         ll.addView(appListContainer, listLp);
 
         sv.addView(ll);
+        refreshAppList();
         return sv;
     }
 
     private void refreshAppList() {
         appListContainer.removeAllViews();
-        appCountText.setText("Scanning...");
+        appCountText.setText(t("扫描中...", "Scanning...", "Сканирование..."));
         new Thread(() -> {
             final java.util.List<String> pkgs = scanPackagesWithIdentity();
             runOnUiThread(() -> {
-                appCountText.setText(pkgs.size() + " app" + (pkgs.size() == 1 ? "" : "s")
-                        + " with spoofed identity");
+                appCountText.setText(pkgs.size() + t(" 个应用有伪装值", " app(s) with spoofed identity", " приложений с подменённой идентичностью"));
                 if (pkgs.isEmpty()) {
                     TextView empty = new TextView(this);
-                    empty.setText("No apps with spoofed identity found.\nEnsure target apps are checked in LSPosed scope and launched at least once.");
+                    empty.setText(t("未找到有伪装值的应用。\n请确保目标应用已在 LSPosed 作用域中勾选并至少运行过一次。",
+                            "No apps with spoofed identity found.\nEnsure target apps are checked in LSPosed scope and launched at least once.",
+                            "Не найдено приложений с подменённой идентичностью.\nУбедитесь, что целевые приложения отмечены в области LSPosed и запускались хотя бы раз."));
                     empty.setTextSize(14);
                     empty.setTextColor(COLOR_GRAY);
                     empty.setPadding(0, 40, 0, 0);
@@ -245,9 +249,9 @@ public class MainActivity extends AppCompatActivity {
     // ===== 应用详情弹窗 =====
     private void showAppDetailDialog(String pkg, String appName) {
         String json = readIdentityFile(pkg);
-        if (json == null) { Toast.makeText(this, "Failed to read identity", Toast.LENGTH_SHORT).show(); return; }
+        if (json == null) { Toast.makeText(this, t("读取失败", "Read failed", "Ошибка чтения"), Toast.LENGTH_SHORT).show(); return; }
         Identity id = Identity.fromJson(json);
-        if (id == null) { Toast.makeText(this, "Failed to parse identity", Toast.LENGTH_SHORT).show(); return; }
+        if (id == null) { Toast.makeText(this, t("解析失败", "Parse failed", "Ошибка парсинга"), Toast.LENGTH_SHORT).show(); return; }
 
         float d = getResources().getDisplayMetrics().density;
         Dialog dialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
@@ -262,7 +266,7 @@ public class MainActivity extends AppCompatActivity {
         root.setBackground(bg);
 
         TextView title = new TextView(this);
-        title.setText("App: " + appName + "\n" + pkg);
+        title.setText(t("应用: ", "App: ", "Приложение: ") + appName + "\n" + pkg);
         title.setTextSize(16);
         title.setTextColor(COLOR_WHITE);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
@@ -277,34 +281,52 @@ public class MainActivity extends AppCompatActivity {
         content.setTextSize(13);
         content.setTextColor(COLOR_GRAY);
         StringBuilder sb = new StringBuilder();
-        if (id.androidId != null) sb.append("Android ID: ").append(id.androidId).append("\n");
-        if (id.advertisingId != null) sb.append("Ad ID: ").append(id.advertisingId).append("\n");
-        if (id.appSetId != null) sb.append("AppSet ID: ").append(id.appSetId).append("\n");
-        if (id.imei != null) sb.append("IMEI: ").append(id.imei).append("\n");
-        if (id.meid != null) sb.append("MEID: ").append(id.meid).append("\n");
-        if (id.serial != null) sb.append("Serial: ").append(id.serial).append("\n");
-        if (id.macAddress != null) sb.append("MAC: ").append(id.macAddress).append("\n");
-        if (id.gsfId != null) sb.append("GSF ID: ").append(id.gsfId).append("\n");
+        String lAndroidId = t("Android ID: ", "Android ID: ", "Android ID: ");
+        String lAdId = t("广告ID: ", "Ad ID: ", "Рекл. ID: ");
+        String lAppSet = t("AppSet ID: ", "AppSet ID: ", "AppSet ID: ");
+        String lImei = t("IMEI: ", "IMEI: ", "IMEI: ");
+        String lMeid = t("MEID: ", "MEID: ", "MEID: ");
+        String lSerial = t("序列号: ", "Serial: ", "Серийный: ");
+        String lMac = t("MAC: ", "MAC: ", "MAC: ");
+        String lGsf = t("GSF ID: ", "GSF ID: ", "GSF ID: ");
+        String lBrand = t("品牌: ", "Brand: ", "Бренд: ");
+        String lModel = t("型号: ", "Model: ", "Модель: ");
+        String lMfr = t("厂商: ", "Manufacturer: ", "Производитель: ");
+        String lFp = t("指纹: ", "Fingerprint: ", "Отпечаток: ");
+        String lBuild = t("Build ID: ", "Build ID: ", "Build ID: ");
+        String lCarrier = t("运营商: ", "Carrier: ", "Оператор: ");
+        String lCarrierCode = t("运营商代码: ", "Carrier Code: ", "Код оператора: ");
+        String lImsi = t("IMSI: ", "IMSI: ", "IMSI: ");
+        String lIccid = t("ICCID: ", "ICCID: ", "ICCID: ");
+
+        if (id.androidId != null) sb.append(lAndroidId).append(id.androidId).append("\n");
+        if (id.advertisingId != null) sb.append(lAdId).append(id.advertisingId).append("\n");
+        if (id.appSetId != null) sb.append(lAppSet).append(id.appSetId).append("\n");
+        if (id.imei != null) sb.append(lImei).append(id.imei).append("\n");
+        if (id.meid != null) sb.append(lMeid).append(id.meid).append("\n");
+        if (id.serial != null) sb.append(lSerial).append(id.serial).append("\n");
+        if (id.macAddress != null) sb.append(lMac).append(id.macAddress).append("\n");
+        if (id.gsfId != null) sb.append(lGsf).append(id.gsfId).append("\n");
         sb.append("\n");
-        if (id.brand != null) sb.append("Brand: ").append(id.brand).append("\n");
-        if (id.model != null) sb.append("Model: ").append(id.model).append("\n");
-        if (id.manufacturer != null) sb.append("Manufacturer: ").append(id.manufacturer).append("\n");
-        if (id.fingerprint != null) sb.append("Fingerprint: ").append(id.fingerprint).append("\n");
-        if (id.buildId != null) sb.append("Build ID: ").append(id.buildId).append("\n");
+        if (id.brand != null) sb.append(lBrand).append(id.brand).append("\n");
+        if (id.model != null) sb.append(lModel).append(id.model).append("\n");
+        if (id.manufacturer != null) sb.append(lMfr).append(id.manufacturer).append("\n");
+        if (id.fingerprint != null) sb.append(lFp).append(id.fingerprint).append("\n");
+        if (id.buildId != null) sb.append(lBuild).append(id.buildId).append("\n");
         sb.append("\n");
-        if (id.networkOperatorName != null) sb.append("Carrier: ").append(id.networkOperatorName).append("\n");
-        if (id.networkOperator != null) sb.append("Carrier Code: ").append(id.networkOperator).append("\n");
-        if (id.imsi != null) sb.append("IMSI: ").append(id.imsi).append("\n");
-        if (id.iccid != null) sb.append("ICCID: ").append(id.iccid).append("\n");
+        if (id.networkOperatorName != null) sb.append(lCarrier).append(id.networkOperatorName).append("\n");
+        if (id.networkOperator != null) sb.append(lCarrierCode).append(id.networkOperator).append("\n");
+        if (id.imsi != null) sb.append(lImsi).append(id.imsi).append("\n");
+        if (id.iccid != null) sb.append(lIccid).append(id.iccid).append("\n");
         content.setText(sb.toString());
         sv.addView(content);
         root.addView(sv, svLp);
 
         LinearLayout btnRow = new LinearLayout(this);
         btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button btnCustom = makeGlassBtn("Customize", 13);
-        Button btnRandom = makeGlassBtn("Random", 13);
-        Button btnBack = makeGlassBtn("Back", 13);
+        Button btnCustom = makeGlassBtn(t("自定义", "Customize", "Настроить"), 13);
+        Button btnRandom = makeGlassBtn(t("随机", "Random", "Случайно"), 13);
+        Button btnBack = makeGlassBtn(t("返回", "Back", "Назад"), 13);
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         btnLp.leftMargin = Math.round(3 * d);
         btnLp.rightMargin = Math.round(3 * d);
@@ -326,7 +348,7 @@ public class MainActivity extends AppCompatActivity {
         btnRandom.setOnClickListener(v -> {
             Identity newId = IdentityGenerator.generateRandom();
             writeIdentityFile(pkg, newId.toJson());
-            Toast.makeText(this, "Random identity generated", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, t("已生成随机身份", "Random identity generated", "Случайная идентичность создана"), Toast.LENGTH_SHORT).show();
             dialog.dismiss();
             refreshAppList();
         });
@@ -363,7 +385,7 @@ public class MainActivity extends AppCompatActivity {
         root.setPadding(Math.round(24 * d), Math.round(40 * d), Math.round(24 * d), Math.round(24 * d));
 
         TextView title = new TextView(this);
-        title.setText("Customize Identity");
+        title.setText(t("自定义身份", "Customize Identity", "Настройка идентичности"));
         title.setTextSize(22);
         title.setTextColor(COLOR_WHITE);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
@@ -382,32 +404,32 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
 
-        addSectionLabel(form, "Device Profile", d);
-        Button deviceBtn = makeGlassBtn("Device: " + (workingId[0].model != null ? workingId[0].model : "Tap to select"), 14);
+        addSectionLabel(form, t("设备型号", "Device Profile", "Модель устройства"), d);
+        Button deviceBtn = makeGlassBtn(t("设备: ", "Device: ", "Устройство: ") + (workingId[0].model != null ? workingId[0].model : t("点击选择", "Tap to select", "Нажмите для выбора")), 14);
         form.addView(deviceBtn, makeFormLp(d));
         deviceBtn.setOnClickListener(v -> showDevicePicker(workingId[0], deviceBtn));
 
-        addSectionLabel(form, "Carrier", d);
-        Button carrierBtn = makeGlassBtn("Carrier: " + (workingId[0].networkOperatorName != null ? workingId[0].networkOperatorName : "Tap to select"), 14);
+        addSectionLabel(form, t("运营商", "Carrier", "Оператор"), d);
+        Button carrierBtn = makeGlassBtn(t("运营商: ", "Carrier: ", "Оператор: ") + (workingId[0].networkOperatorName != null ? workingId[0].networkOperatorName : t("点击选择", "Tap to select", "Нажмите для выбора")), 14);
         form.addView(carrierBtn, makeFormLp(d));
         carrierBtn.setOnClickListener(v -> showCarrierPicker(workingId[0], carrierBtn));
 
-        addSectionLabel(form, "Identifiers", d);
+        addSectionLabel(form, t("标识符", "Identifiers", "Идентификаторы"), d);
         addFieldRow(form, "Android ID", workingId[0].androidId, d, val -> workingId[0].androidId = val, true);
-        addFieldRow(form, "Ad ID (AAID)", workingId[0].advertisingId, d, val -> workingId[0].advertisingId = val, true);
+        addFieldRow(form, t("广告ID", "Ad ID (AAID)", "Рекл. ID"), workingId[0].advertisingId, d, val -> workingId[0].advertisingId = val, true);
         addFieldRow(form, "AppSet ID", workingId[0].appSetId, d, val -> workingId[0].appSetId = val, true);
         addFieldRow(form, "GSF ID", workingId[0].gsfId, d, val -> workingId[0].gsfId = val, true);
         addFieldRow(form, "IMEI", workingId[0].imei, d, val -> workingId[0].imei = val, true);
         addFieldRow(form, "MEID", workingId[0].meid, d, val -> workingId[0].meid = val, true);
-        addFieldRow(form, "Serial", workingId[0].serial, d, val -> workingId[0].serial = val, true);
-        addFieldRow(form, "MAC Address", workingId[0].macAddress, d, val -> workingId[0].macAddress = val, true);
+        addFieldRow(form, t("序列号", "Serial", "Серийный"), workingId[0].serial, d, val -> workingId[0].serial = val, true);
+        addFieldRow(form, t("MAC地址", "MAC Address", "MAC-адрес"), workingId[0].macAddress, d, val -> workingId[0].macAddress = val, true);
 
-        addSectionLabel(form, "Build Info", d);
+        addSectionLabel(form, t("Build信息", "Build Info", "Build инфо"), d);
         addFieldRow(form, "Build ID", workingId[0].buildId, d, val -> workingId[0].buildId = val, false);
         addFieldRow(form, "Bootloader", workingId[0].bootloader, d, val -> workingId[0].bootloader = val, false);
-        addFieldRow(form, "Radio Version", workingId[0].radioVersion, d, val -> workingId[0].radioVersion = val, false);
+        addFieldRow(form, t("Radio版本", "Radio Version", "Версия Radio"), workingId[0].radioVersion, d, val -> workingId[0].radioVersion = val, false);
 
-        addSectionLabel(form, "SIM Info", d);
+        addSectionLabel(form, t("SIM信息", "SIM Info", "SIM инфо"), d);
         addFieldRow(form, "IMSI", workingId[0].imsi, d, val -> workingId[0].imsi = val, false);
         addFieldRow(form, "ICCID", workingId[0].iccid, d, val -> workingId[0].iccid = val, false);
 
@@ -416,8 +438,8 @@ public class MainActivity extends AppCompatActivity {
 
         LinearLayout btnRow = new LinearLayout(this);
         btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button btnSave = makeGlassBtn("Save", 15);
-        Button btnCancel = makeGlassBtn("Cancel", 15);
+        Button btnSave = makeGlassBtn(t("保存", "Save", "Сохранить"), 15);
+        Button btnCancel = makeGlassBtn(t("取消", "Cancel", "Отмена"), 15);
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         blp.leftMargin = Math.round(4 * d);
         blp.rightMargin = Math.round(4 * d);
@@ -435,9 +457,8 @@ public class MainActivity extends AppCompatActivity {
 
         btnCancel.setOnClickListener(v -> dialog.dismiss());
         btnSave.setOnClickListener(v -> {
-            // 保存前确保所有 EditText 的值已提交
             writeIdentityFile(pkg, workingId[0].toJson());
-            Toast.makeText(this, "Identity saved", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, t("身份已保存", "Identity saved", "Идентичность сохранена"), Toast.LENGTH_SHORT).show();
             dialog.dismiss();
             refreshAppList();
         });
@@ -463,7 +484,7 @@ public class MainActivity extends AppCompatActivity {
         row.addView(et, etLp);
 
         if (canRandom) {
-            Button rnd = makeGlassBtn("Rnd", 11);
+            Button rnd = makeGlassBtn(t("随机", "Rnd", "Случ"), 11);
             LinearLayout.LayoutParams rndLp = new LinearLayout.LayoutParams(Math.round(60 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
             rndLp.leftMargin = Math.round(8 * d);
             row.addView(rnd, rndLp);
@@ -471,13 +492,13 @@ public class MainActivity extends AppCompatActivity {
                 Identity tmp = IdentityGenerator.generateRandom();
                 String newVal = "?";
                 if ("Android ID".equals(label)) newVal = tmp.androidId;
-                else if ("Ad ID (AAID)".equals(label)) newVal = tmp.advertisingId;
+                else if (label.contains("Ad ID") || label.contains("广告")) newVal = tmp.advertisingId;
                 else if ("AppSet ID".equals(label)) newVal = tmp.appSetId;
                 else if ("GSF ID".equals(label)) newVal = tmp.gsfId;
                 else if ("IMEI".equals(label)) newVal = tmp.imei;
                 else if ("MEID".equals(label)) newVal = tmp.meid;
-                else if ("Serial".equals(label)) newVal = tmp.serial;
-                else if ("MAC Address".equals(label)) newVal = tmp.macAddress;
+                else if (label.contains("Serial") || label.contains("序列")) newVal = tmp.serial;
+                else if (label.contains("MAC")) newVal = tmp.macAddress;
                 et.setText(newVal);
             });
         }
@@ -515,14 +536,14 @@ public class MainActivity extends AppCompatActivity {
             String[] names = new String[profiles.length];
             for (int i = 0; i < profiles.length; i++) names[i] = profiles[i][0] + " " + profiles[i][1];
             new AlertDialog.Builder(this)
-                    .setTitle("Select Device")
+                    .setTitle(t("选择设备", "Select Device", "Выберите устройство"))
                     .setItems(names, (d, which) -> {
                         String[] p = profiles[which];
                         id.brand = p[0]; id.model = p[1]; id.manufacturer = p[2];
                         id.device = p[3]; id.product = p[4]; id.hardware = p[5]; id.fingerprint = p[6];
-                        updateBtn.setText("Device: " + p[1]);
+                        updateBtn.setText(t("设备: ", "Device: ", "Устройство: ") + p[1]);
                     })
-                    .setNegativeButton("Cancel", null)
+                    .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
                     .show();
         } catch (Throwable e) {
             Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -537,7 +558,7 @@ public class MainActivity extends AppCompatActivity {
             String[] names = new String[carriers.length];
             for (int i = 0; i < carriers.length; i++) names[i] = carriers[i][1] + " (" + carriers[i][0] + ")";
             new AlertDialog.Builder(this)
-                    .setTitle("Select Carrier")
+                    .setTitle(t("选择运营商", "Select Carrier", "Выберите оператора"))
                     .setItems(names, (d, which) -> {
                         String[] c = carriers[which];
                         id.networkOperator = c[0]; id.networkOperatorName = c[1];
@@ -545,9 +566,9 @@ public class MainActivity extends AppCompatActivity {
                         id.simCountryIso = c[2]; id.networkCountryIso = c[2];
                         Identity tmp = IdentityGenerator.generateRandom();
                         id.imsi = c[0] + tmp.imsi.substring(Math.min(c[0].length(), tmp.imsi.length()));
-                        updateBtn.setText("Carrier: " + c[1]);
+                        updateBtn.setText(t("运营商: ", "Carrier: ", "Оператор: ") + c[1]);
                     })
-                    .setNegativeButton("Cancel", null)
+                    .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
                     .show();
         } catch (Throwable e) {
             Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -563,14 +584,28 @@ public class MainActivity extends AppCompatActivity {
         ll.setPadding(Math.round(24 * d), Math.round(48 * d), Math.round(24 * d), Math.round(32 * d));
 
         TextView title = new TextView(this);
-        title.setText("Settings");
+        title.setText(t("设置", "Settings", "Настройки"));
         title.setTextSize(28);
         title.setTextColor(COLOR_WHITE);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         ll.addView(title);
 
-        addSettingsSection(ll, "Language", d);
-        Button btnLang = makeGlassBtn("Language: English", 15);
+        // 副标题
+        TextView subtitle = new TextView(this);
+        subtitle.setText(t("清除应用数据后自动生成全新设备识别码",
+                "Auto-generate new device identity after clearing app data",
+                "Автоматическая генерация новой идентификации устройства после очистки данных"));
+        subtitle.setTextSize(14);
+        subtitle.setTextColor(COLOR_GRAY);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.topMargin = Math.round(8 * d);
+        ll.addView(subtitle, subLp);
+
+        // 语言
+        addSettingsSection(ll, t("语言", "Language", "Язык"), d);
+        String langName = LANG_EN.equals(currentLang) ? "English" : LANG_ZH.equals(currentLang) ? "中文" : "Русский";
+        Button btnLang = makeGlassBtn(t("语言: ", "Language: ", "Язык: ") + langName, 15);
         ll.addView(btnLang, makeFormLp(d));
         btnLang.setOnClickListener(v -> {
             if (LANG_EN.equals(currentLang)) currentLang = LANG_ZH;
@@ -578,16 +613,25 @@ public class MainActivity extends AppCompatActivity {
             else currentLang = LANG_EN;
             getSharedPreferences("devicereset_ui", MODE_PRIVATE)
                     .edit().putString(PREFS_LANG, currentLang).apply();
-            btnLang.setText("Language: " + (LANG_EN.equals(currentLang) ? "English" : LANG_ZH.equals(currentLang) ? "中文" : "Русский"));
-            Toast.makeText(this, "Language changed, restart app to apply", Toast.LENGTH_SHORT).show();
+            recreate();
         });
 
-        Button btnUpdate = makeGlassBtn("Check Update", 15);
+        // 检查更新
+        Button btnUpdate = makeGlassBtn(t("检查更新", "Check Update", "Проверить обновления"), 15);
         ll.addView(btnUpdate, makeFormLp(d));
         btnUpdate.setOnClickListener(v -> checkUpdate(true));
 
-        addSettingsSection(ll, "Spoofing Options", d);
-        String[] hookLabels = {"Android ID", "Ad ID (AAID)", "IMEI/MEID", "Device Model (Build)", "MAC Address", "GSF ID", "Carrier Info"};
+        // 伪装选项
+        addSettingsSection(ll, t("伪装选项", "Spoofing Options", "Параметры подмены"), d);
+        String[] hookLabels = {
+                t("伪装 Android ID", "Spoof Android ID", "Подмена Android ID"),
+                t("伪装 广告ID", "Spoof Ad ID (AAID)", "Подмена рекламного ID"),
+                t("伪装 IMEI/MEID", "Spoof IMEI/MEID", "Подмена IMEI/MEID"),
+                t("伪装 设备型号", "Spoof Device Model", "Подмена модели устройства"),
+                t("伪装 MAC地址", "Spoof MAC Address", "Подмена MAC-адреса"),
+                t("伪装 GSF ID", "Spoof GSF ID", "Подмена GSF ID"),
+                t("伪装 运营商信息", "Spoof Carrier Info", "Подмена информации оператора")
+        };
         for (int i = 0; i < 7; i++) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
@@ -606,37 +650,49 @@ public class MainActivity extends AppCompatActivity {
         }
         loadHookStates();
 
-        addSettingsSection(ll, "Maintenance", d);
-        Button btnReset = makeGlassBtn("Reset Identity (by package)", 15);
+        // 维护
+        addSettingsSection(ll, t("维护", "Maintenance", "Обслуживание"), d);
+        Button btnReset = makeGlassBtn(t("手动重置身份", "Reset Identity (by package)", "Сбросить идентичность"), 15);
         ll.addView(btnReset, makeFormLp(d));
         btnReset.setOnClickListener(v -> showResetDialog());
 
-        Button btnAbout = makeGlassBtn("About", 15);
+        Button btnAbout = makeGlassBtn(t("关于", "About", "О программе"), 15);
         ll.addView(btnAbout, makeFormLp(d));
         btnAbout.setOnClickListener(v -> showAboutDialog());
 
-        addSettingsSection(ll, "Usage", d);
-        addInfoBlock(ll, "How to use",
-                "1. LSPosed Manager -> Modules -> Enable this module -> Check target apps in Scope\n" +
-                "2. Reboot phone (required)\n" +
-                "3. Clear target app data (System Settings -> Apps -> Storage -> Clear data)\n" +
-                "4. Reopen the app to get a brand new device identity\n" +
-                "5. Use the Apps tab to view and customize per-app identities", d);
-        addInfoBlock(ll, "How it works",
-                "The module places a hidden sentinel file in the target app's private directory. " +
-                "Clearing app data deletes the entire private directory, including the sentinel file. " +
-                "On next launch, the module detects the missing sentinel and generates a new device identity.", d);
-        addInfoBlock(ll, "Spoofed identifiers",
-                "* Android ID (SSAID)\n* Advertising ID (AAID) / AppSet ID\n* IMEI / MEID / IMSI / ICCID\n" +
-                "* Serial number / MAC address\n* GSF ID\n* Device: Brand, Model, Manufacturer, Build fingerprint\n" +
-                "* Carrier: Code, Name, Country", d);
-        addInfoBlock(ll, "Warnings",
-                "* For personal privacy protection and technical testing only\n" +
-                "* Some apps detect Xposed/Root traces, account ban risk exists\n" +
-                "* For packed apps, enable \"Exclude resource hooks\" in LSPosed scope\n" +
-                "* Native-layer system property reads cannot be intercepted by Java hooks\n" +
-                "* Test on non-critical apps first\n" +
-                "* Troubleshooting: LSPosed -> Logs -> Search \"DeviceReset\"", d);
+        // 说明文字（原首页内容）
+        addSettingsSection(ll, t("使用方法", "Usage", "Использование"), d);
+        addInfoBlock(ll, t("使用方法", "How to use", "Как использовать"),
+                t("1. LSPosed管理器 → 模块 → 启用本模块 → 作用域勾选目标应用\n" +
+                  "2. 重启手机（必须重启）\n" +
+                  "3. 系统设置 → 应用 → 目标应用 → 存储 → 清除数据\n" +
+                  "4. 重新打开应用，即获得全新设备身份\n" +
+                  "5. 在「应用」页查看和自定义每个应用的身份",
+                  "1. LSPosed Manager -> Modules -> Enable this module -> Check target apps in Scope\n" +
+                  "2. Reboot phone (required)\n" +
+                  "3. System Settings -> Apps -> Target app -> Storage -> Clear data\n" +
+                  "4. Reopen the app to get a brand new device identity\n" +
+                  "5. Use the Apps tab to view and customize per-app identities",
+                  "1. LSPosed Manager -> Модули -> Включить модуль -> Отметить целевые приложения\n" +
+                  "2. Перезагрузите телефон (обязательно)\n" +
+                  "3. Настройки -> Приложения -> Целевое приложение -> Память -> Очистить данные\n" +
+                  "4. Переоткройте приложение для получения новой идентичности\n" +
+                  "5. Используйте вкладку «Приложения» для просмотра и настройки"), d);
+
+        addInfoBlock(ll, t("工作原理", "How It Works", "Как это работает"),
+                t("模块在目标应用私有目录放置隐藏哨兵文件。清除应用数据会删除整个私有目录，哨兵文件也被删除。下次应用启动时检测到哨兵不存在，即生成全新设备身份并写入新哨兵。",
+                "The module places a hidden sentinel file in the target app's private directory. Clearing app data deletes the entire private directory, including the sentinel file. On next launch, the module detects the missing sentinel and generates a new device identity.",
+                "Модуль помещает скрытый файл-sentinel в приватный каталог целевого приложения. Очистка данных удаляет весь приватный каталог. При следующем запуске модуль обнаруживает отсутствие sentinel и генерирует новую идентичность."), d);
+
+        addInfoBlock(ll, t("伪装的识别码", "Spoofed Identifiers", "Подменяемые идентификаторы"),
+                t("• Android ID (SSAID)\n• 广告ID (AAID) / AppSet ID\n• IMEI / MEID / IMSI / ICCID\n• 序列号 / MAC地址\n• GSF ID\n• 设备型号：品牌、型号、厂商、Build指纹\n• 运营商信息：代码、名称、国家",
+                "• Android ID (SSAID)\n• Advertising ID (AAID) / AppSet ID\n• IMEI / MEID / IMSI / ICCID\n• Serial number / MAC address\n• GSF ID\n• Device: Brand, Model, Manufacturer, Build fingerprint\n• Carrier: Code, Name, Country",
+                "• Android ID (SSAID)\n• Рекламный ID (AAID) / AppSet ID\n• IMEI / MEID / IMSI / ICCID\n• Серийный номер / MAC-адрес\n• GSF ID\n• Устройство: бренд, модель, производитель, отпечаток Build\n• Оператор: код, название, страна"), d);
+
+        addInfoBlock(ll, t("注意事项", "Warnings", "Предупреждения"),
+                t("• 本模块仅用于个人隐私保护和技术测试\n• 部分应用会检测Xposed/Root痕迹，存在账号封禁风险\n• 加壳应用请在LSPosed作用域设置中勾选「排除资源钩子」\n• native层直接读取系统属性的应用，Java层Hook无法拦截\n• 建议先在不重要的应用上测试\n• 排查问题：LSPosed → 日志 → 搜索「DeviceReset」",
+                "• For personal privacy protection and technical testing only\n• Some apps detect Xposed/Root traces, account ban risk exists\n• For packed apps, enable \"Exclude resource hooks\" in LSPosed scope\n• Native-layer system property reads cannot be intercepted by Java hooks\n• Test on non-critical apps first\n• Troubleshooting: LSPosed -> Logs -> Search \"DeviceReset\"",
+                "• Только для защиты личной конфиденциальности и технического тестирования\n• Некоторые приложения обнаруживают следы Xposed/Root, существует риск блокировки\n• Для упакованных приложений включите «Исключить хуки ресурсов»\n• Нативные чтения системных свойств не могут быть перехвачены Java-хуками\n• Сначала тестируйте на некритичных приложениях\n• Устранение неполадок: LSPosed -> Журналы -> Поиск «DeviceReset»"), d);
 
         sv.addView(ll);
         return sv;
@@ -776,38 +832,42 @@ public class MainActivity extends AppCompatActivity {
     // ===== 对话框 =====
     private void showResetDialog() {
         final EditText input = new EditText(this);
-        input.setHint("Enter package name, e.g. com.example.app");
+        input.setHint(t("输入应用包名，如 com.example.app", "Enter package name, e.g. com.example.app", "Введите имя пакета, например com.example.app"));
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(48, 24, 48, 24);
         layout.addView(input);
         new AlertDialog.Builder(this)
-                .setTitle("Reset Identity")
-                .setMessage("Enter the package name to reset. Next launch will get a new identity.")
+                .setTitle(t("手动重置身份", "Reset Identity", "Сбросить идентичность"))
+                .setMessage(t("输入要重置身份的应用包名。重置后该应用下次启动将获得全新设备身份（无需清除数据）。",
+                        "Enter the package name to reset. Next launch will get a new identity (no need to clear data).",
+                        "Введите имя пакета для сброса. При следующем запуске будет получена новая идентичность."))
                 .setView(layout)
-                .setPositiveButton("Reset", (d, w) -> {
+                .setPositiveButton(t("重置", "Reset", "Сбросить"), (d, w) -> {
                     String pkg = input.getText().toString().trim();
-                    if (pkg.isEmpty()) { Toast.makeText(this, "Please enter package name", Toast.LENGTH_SHORT).show(); return; }
+                    if (pkg.isEmpty()) { Toast.makeText(this, t("请输入包名", "Please enter package name", "Введите имя пакета"), Toast.LENGTH_SHORT).show(); return; }
                     try {
                         boolean ok = SentinelDetector.resetIdentity(pkg, this);
-                        Toast.makeText(this, ok ? "Reset " + pkg : "Reset failed, ensure ROOT", Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, ok ? t("已重置 ", "Reset ", "Сброшена ") + pkg : t("重置失败，请确保已授予ROOT权限", "Reset failed, ensure ROOT access", "Сброс не удался, убедитесь в наличии Root-прав"), Toast.LENGTH_LONG).show();
                     } catch (Throwable t) {
-                        Toast.makeText(this, "Error: " + t.getMessage(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, t("错误: ", "Error: ", "Ошибка: ") + t.getMessage(), Toast.LENGTH_LONG).show();
                     }
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
                 .show();
     }
 
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage("Version: 3.0.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to all apps checked in LSPosed scope.\nSupports Chinese / English / Russian")
-                .setPositiveButton("OK", null)
+                .setMessage(t("版本：3.0.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
+                        "Version: 3.0.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to all apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
+                        "Версия: 3.0.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется ко всем приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
+                .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
 
-    // ===== 更新检测 =====
+    // ===== 更新检测（保留原项目逻辑） =====
     private void checkUpdate(boolean manual) {
         String versionName;
         try {
@@ -818,7 +878,9 @@ public class MainActivity extends AppCompatActivity {
                     if (hasUpdate) {
                         showUpdateDialog(latest, tag);
                     } else if (manual) {
-                        Toast.makeText(this, error != null ? "Update check failed: " + error : "You are up to date",
+                        Toast.makeText(this, error != null ?
+                                t("检查更新失败: ", "Update check failed: ", "Не удалось проверить обновления: ") + error :
+                                t("已是最新版本", "You are up to date", "У вас последняя версия"),
                                 Toast.LENGTH_SHORT).show();
                     }
                 }));
@@ -826,9 +888,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void showUpdateDialog(String latest, String tag) {
         new AlertDialog.Builder(this)
-                .setTitle("New version v" + latest)
-                .setMessage("Download now?")
-                .setPositiveButton("Download", (d, w) -> {
+                .setTitle(t("发现新版本 v", "New version v", "Доступна новая версия v") + latest)
+                .setMessage(t("检测到新版本，是否下载？", "New version detected. Download?", "Обнаружена новая версия. Скачать?"))
+                .setPositiveButton(t("下载", "Download", "Скачать"), (d, w) -> {
                     String asset = "DeviceResetSpooferX-v" + latest + ".apk";
                     String direct = "https://github.com/" + UPDATE_REPO + "/releases/download/" + tag + "/" + asset;
                     String[] mirrors = {"https://ghfast.top/", "https://gh-proxy.com/", "https://ghproxy.net/",
@@ -839,7 +901,7 @@ public class MainActivity extends AppCompatActivity {
                     AppDownloader.start(this, urls, REPO_HOME_URL,
                             "DeviceResetSpooferX-v" + latest + ".apk", latest, currentLang);
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
                 .show();
     }
 }
