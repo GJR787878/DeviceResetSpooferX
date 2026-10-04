@@ -59,7 +59,7 @@ public class ConfigActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         try {
             SharedPreferences prefs = getSharedPreferences("devicereset_ui", MODE_PRIVATE);
-            currentLang = prefs.getString(PREFS_LANG, LANG_ZH);
+            currentLang = prefs.getString(PREFS_LANG, LANG_EN);
 
             setContentView(R.layout.activity_config);
             updateLanguage();

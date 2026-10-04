@@ -7,15 +7,15 @@ def keystorePath = System.getenv("DRS_KEYSTORE_PATH") ?: "keystore/devicereset-r
 def keystorePass = System.getenv("DRS_KEYSTORE_PASS") ?: "DRS_Key_2026!"
 
 android {
-    namespace 'io.github.gjr787878.devicereset'
+    namespace "io.github.gjr787878.devicereset"
     compileSdk 34
 
     defaultConfig {
         applicationId "io.github.gjr787878.devicereset"
         minSdk 24
         targetSdk 34
-        versionCode 43
-        versionName "2.23"
+        versionCode 44
+        versionName "3.0.0"
     }
 
     signingConfigs {
@@ -23,7 +23,7 @@ android {
             // rootProject.file: 相对仓库根解析(keystore/目录在仓库根)
             storeFile rootProject.file(keystorePath)
             storePassword keystorePass
-            keyAlias "devicereset"
+            keyAlias "deviceresetx"
             keyPassword keystorePass
         }
     }
