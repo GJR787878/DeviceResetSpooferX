@@ -29,6 +29,11 @@
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
+        <!-- 建议作用域：LSPosed Manager 安装/启用模块时自动预勾选「系统框架」(system)，
+             实现全局注入 + 应用内 targets.txt 过滤，免手动勾选目标应用 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
 
         <!-- 内置下载 APK 安装：FileProvider 提供 content:// 访问 -->
         <provider
