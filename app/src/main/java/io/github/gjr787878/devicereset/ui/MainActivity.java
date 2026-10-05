@@ -359,12 +359,12 @@ public class MainActivity extends AppCompatActivity {
         btnBack.setOnClickListener(v -> dialog.dismiss());
         btnRandom.setOnClickListener(v -> {
             Identity newId = IdentityGenerator.generateRandom();
-            String json = newId.toJson();
-            writeIdentityFile(pkg, json);
-            writeExternalIdentityFile(pkg, json);
+            String rndJson = newId.toJson();
+            writeIdentityFile(pkg, rndJson);
+            writeExternalIdentityFile(pkg, rndJson);
             boolean cleared = false;
             if (isAutoClearAfterSave()) {
-                cleared = clearTargetAppData(pkg, json);
+                cleared = clearTargetAppData(pkg, rndJson);
             }
             Toast.makeText(this, cleared
                             ? t("已生成随机身份并清空目标应用数据，已重启", "Random identity generated, app data cleared & restarted", "Случайная идентичность создана, данные очищены и приложение перезапущено")
