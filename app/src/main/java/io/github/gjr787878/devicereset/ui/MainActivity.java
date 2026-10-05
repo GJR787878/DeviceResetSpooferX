@@ -1730,7 +1730,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.8.4 (versionCode 60)\n");
+                devInfo.append("Module Version: 3.8.5 (versionCode 61)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1841,6 +1841,7 @@ public class MainActivity extends AppCompatActivity {
                     os.writeBytes("cp /data/adb/lspd/config/modules_config.db '" + tmpDir.getAbsolutePath() + "/dbdump/' 2>&1 || echo CP_DB_FAIL\n");
                     os.writeBytes("cp /data/adb/lspd/config/modules_config.db-wal '" + tmpDir.getAbsolutePath() + "/dbdump/' 2>&1 || echo CP_WAL_FAIL\n");
                     os.writeBytes("cp /data/adb/lspd/config/modules_config.db-shm '" + tmpDir.getAbsolutePath() + "/dbdump/' 2>&1 || echo CP_SHM_FAIL\n");
+                    os.writeBytes("chmod 666 '" + tmpDir.getAbsolutePath() + "/dbdump/'* 2>&1 || true\n");
                     os.writeBytes("echo '--- find lspd 配置文件 ---'\n");
                     os.writeBytes("find /data/adb/lspd -maxdepth 3 -name '*.db' -o -name '*.json' -o -name '*.xml' 2>/dev/null\n");
                     os.writeBytes("S=''\n");
@@ -1971,6 +1972,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addToZip(java.util.zip.ZipOutputStream zos, java.io.File file, String prefix) throws Exception {
+        // 单文件不可读（如 root 拷贝的 600 文件）跳过，不中断整个 zip
+        if (!file.canRead()) return;
         java.io.FileInputStream fis = new java.io.FileInputStream(file);
         java.util.zip.ZipEntry entry = new java.util.zip.ZipEntry(prefix + file.getName());
         zos.putNextEntry(entry);
