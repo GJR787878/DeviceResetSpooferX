@@ -275,7 +275,7 @@ public class MainActivity extends AppCompatActivity {
                             + t("」？将取消选择并删除其身份哨兵文件（不会卸载应用本身）。",
                                 "\"? It will be deselected and its identity sentinel files deleted (the app itself is not uninstalled).",
                                 "»? Приложение будет убрано из целей, сторожевые файлы удалены (само приложение не удаляется)."))
-                    .setPositiveButton(t("删除", "Remove", "Удалить"), (d, w) -> {
+                    .setPositiveButton(t("删除", "Remove", "Удалить"), (dd, w) -> {
                         Config.removeTargetPackage(this, pkg);
                         deleteIdentityFiles(pkg);
                         refreshAppList();
