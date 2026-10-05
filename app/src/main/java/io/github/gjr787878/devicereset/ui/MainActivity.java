@@ -959,7 +959,7 @@ public class MainActivity extends AppCompatActivity {
 
                 // 6. 打包成 zip
                 java.io.File zipFile = new java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                        android.os.Environment.DIRECTORY_DOWNLOAD), "log.zip");
+                        android.os.Environment.DIRECTORY_DOWNLOADS), "log.zip");
                 zipDirectory(tmpDir, zipFile);
 
                 // 清理临时目录
