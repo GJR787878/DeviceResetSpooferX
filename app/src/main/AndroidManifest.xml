@@ -41,6 +41,13 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- LSPosed libxposed:service 接入：框架通过该 provider 向模块 UI 进程注入
+             IXposedService binder，实现应用内动态请求/移除作用域（免开 LSPosed 管理器） -->
+        <provider
+            android:name="io.github.libxposed.service.XposedProvider"
+            android:authorities="io.github.gjr787878.devicereset.XposedService"
+            android:exported="true" />
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true">

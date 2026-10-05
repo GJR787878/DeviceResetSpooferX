@@ -27,9 +27,11 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import io.github.gjr787878.devicereset.Config;
 import io.github.gjr787878.devicereset.GlassButtonDrawable;
+import io.github.gjr787878.devicereset.LSPosedScopeHelper;
 import io.github.gjr787878.devicereset.xposed.Identity;
 import io.github.gjr787878.devicereset.xposed.IdentityGenerator;
 import io.github.gjr787878.devicereset.xposed.SentinelDetector;
+import io.github.libxposed.service.XposedService;
 
 public class MainActivity extends AppCompatActivity {
     private static final String PREFS_LANG = "app_language";
@@ -64,6 +66,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 注册 LSPosed 框架 binder：新版 LSPosed 会通过 XposedProvider 注入 service，
+        // 之后应用内选目标即可动态请求作用域（免开 LSPosed 管理器）
+        LSPosedScopeHelper.init();
         SharedPreferences prefs = getSharedPreferences("devicereset_ui", MODE_PRIVATE);
         currentLang = prefs.getString(PREFS_LANG, LANG_EN);
         buildRootUI();
@@ -73,8 +78,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 兜底：每次回到应用页静默同步一次作用域（无目标/非 LSPosed 环境自动跳过，不打扰）
-        autoSyncScopeToLSPosed();
+        // 兜底：已连接 libxposed 框架时作用域由 requestScope/removeScope 维护，无需写库；
+        // 仅老框架（无 libxposed service）回退 root 写库同步（无目标/非 LSPosed 环境自动跳过，不打扰）
+        if (!LSPosedScopeHelper.isConnected()) autoSyncScopeToLSPosed();
     }
 
     private void buildRootUI() {
@@ -298,7 +304,11 @@ public class MainActivity extends AppCompatActivity {
                         Config.removeTargetPackage(this, pkg);
                         Config.removeIdentity(this, pkg);
                         deleteIdentityFiles(pkg);
-                        autoSyncScopeToLSPosed();
+                        if (LSPosedScopeHelper.isConnected()) {
+                            LSPosedScopeHelper.removeScope(pkg);
+                        } else {
+                            autoSyncScopeToLSPosed();
+                        }
                         refreshAppList();
                         Toast.makeText(this,
                                 t("已删除: ", "Removed: ", "Удалено: ") + name,
@@ -320,7 +330,11 @@ public class MainActivity extends AppCompatActivity {
         // 打开详情即视为选中目标应用（同步到模块配置，MainHook 只对目标生效）
         getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
         Config.addTargetPackage(this, pkg);
-        autoSyncScopeToLSPosed();
+        if (LSPosedScopeHelper.isConnected()) {
+            LSPosedScopeHelper.requestScope(pkg, scopeEventListener());
+        } else {
+            autoSyncScopeToLSPosed();
+        }
         Identity id = (json != null && json.startsWith("{")) ? Identity.fromJson(json) : null;
 
         float d = getResources().getDisplayMetrics().density;
@@ -973,12 +987,36 @@ public class MainActivity extends AppCompatActivity {
     private void addTargetFromPicker(String pkg, Dialog dialog) {
         getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
         Config.addTargetPackage(this, pkg);
-        autoSyncScopeToLSPosed();
+        // 新版 LSPosed：应用内弹授权窗动态加入作用域（免开管理器）；老框架回退 root 写库
+        if (LSPosedScopeHelper.isConnected()) {
+            LSPosedScopeHelper.requestScope(pkg, scopeEventListener());
+        } else {
+            autoSyncScopeToLSPosed();
+        }
         Toast.makeText(this,
                 t("已添加目标应用（可在详情中点击「随机」/「自定义」生成伪装值）", "Target app added (tap Random / Customize in its detail to generate a spoofed identity)", "Приложение добавлено (нажмите «Случайно»/«Настроить» в его деталях, чтобы создать подменённую идентичность)"),
                 Toast.LENGTH_SHORT).show();
         refreshAppList();
         dialog.dismiss();
+    }
+
+    /** LSPosed 作用域请求回调：授权/失败时给出轻提示（不打扰流程） */
+    private XposedService.OnScopeEventListener scopeEventListener() {
+        return new XposedService.OnScopeEventListener() {
+            @Override
+            public void onScopeRequestApproved(java.util.List<String> packageNames) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        t("已加入作用域，重新打开目标应用即可生效", "Scope granted; reopen the target app to take effect", "Добавлено в область; перезапустите приложение для применения"),
+                        Toast.LENGTH_SHORT).show());
+            }
+
+            @Override
+            public void onScopeRequestFailed(String message) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        t("作用域请求失败: ", "Scope request failed: ", "Ошибка запроса области: ") + message,
+                        Toast.LENGTH_SHORT).show());
+            }
+        };
     }
 
     /** 选择器列表条目 */
@@ -1571,7 +1609,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.5.1 (versionCode 51)\n");
+                devInfo.append("Module Version: 3.6.0 (versionCode 52)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1821,9 +1859,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.5.1\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
-                        "Version: 3.5.1\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
-                        "Версия: 3.5.1\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.6.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
+                        "Version: 3.6.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
+                        "Версия: 3.6.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
