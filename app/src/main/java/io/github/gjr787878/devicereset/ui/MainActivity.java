@@ -1066,15 +1066,14 @@ public class MainActivity extends AppCompatActivity {
             os.writeBytes("exit\n");
             os.flush();
             su.waitFor();
-            // 4. 重启目标应用，模块加载哨兵身份，立即生效
-            relaunchApp(pkg);
+            // 4. 不再自动打开目标应用：保持停止状态，用户下次手动打开时模块按哨兵身份生效
             return true;
         } catch (Throwable t) {
             return false;
         }
     }
 
-    /** 用 monkey 拉起目标应用默认入口 */
+    /** 用 monkey 拉起目标应用默认入口（当前仅预留，清数据后不再自动拉起） */
     private void relaunchApp(String pkg) {
         try {
             Process su = Runtime.getRuntime().exec("su");
@@ -1090,16 +1089,16 @@ public class MainActivity extends AppCompatActivity {
     private void showClearDataPrompt(final String pkg, final String json) {
         showGlassConfirm(
                 t("是否清空数据？", "Clear data now?", "Очистить данные сейчас?"),
-                t("修改成功。部分应用需要清空数据并重新打开才能生效：\n将清除目标应用的缓存、数据库、偏好设置（保留伪装身份），并自动重启该应用。\n选择「取消」则保持现状，伪装值在下次重新打开目标应用时生效。",
-                  "Saved. Some apps need their data cleared and to be reopened before the new identity applies:\nThis clears the target app's cache, databases and prefs (spoofed identity is kept), then restarts it automatically.\nChoose Cancel to keep as-is; the identity applies the next time you open the target app.",
-                  "Сохранено. Некоторым приложениям требуется очистка данных и повторное открытие, чтобы применилась новая идентичность:\nБудут удалены кэш, базы данных и настройки приложения (подменённая идентичность сохраняется), приложение будет перезапущено автоматически.\nВыберите «Отмена» — идентичность применится при следующем открытии приложения."),
+                t("修改成功。部分应用需要清空数据并重新打开才能生效：\n将清除目标应用的缓存、数据库、偏好设置（保留伪装身份），并停止该应用。\n选择「清空所有数据」后请手动重新打开目标应用，伪装值立即生效；\n选择「取消」则保持现状，伪装值在下次重新打开目标应用时生效。",
+                  "Saved. Some apps need their data cleared and to be reopened before the new identity applies:\nThis clears the target app's cache, databases and prefs (spoofed identity is kept) and stops the app.\nAfter choosing Clear All Data, reopen the target app manually and the identity applies immediately;\nchoose Cancel to keep as-is — the identity applies the next time you open the target app.",
+                  "Сохранено. Некоторым приложениям требуется очистка данных и повторное открытие, чтобы применилась новая идентичность:\nБудут удалены кэш, базы данных и настройки приложения (подменённая идентичность сохраняется), приложение будет остановлено.\nПосле выбора «Очистить все данные» откройте приложение вручную — идентичность применится сразу;\nпри выборе «Отмена» идентичность применится при следующем открытии приложения."),
                 t("清空所有数据", "Clear All Data", "Очистить все данные"),
                 true,
                 () -> {
                     new Thread(() -> {
                         final boolean ok = clearTargetAppData(pkg, json);
                         runOnUiThread(() -> Toast.makeText(this, ok
-                                ? t("已清空并重启: ", "Cleared & restarted: ", "Очищено и перезапущено: ") + pkg
+                                ? t("已清空数据: ", "Data cleared: ", "Данные очищены: ") + pkg
                                 : t("清空失败，请确认已授予ROOT权限（身份已保存，下次打开应用生效）",
                                         "Clear failed, ensure ROOT access (identity saved; it applies on next open)",
                                         "Ошибка очистки, проверьте Root-права (идентичность сохранена, применится при следующем открытии)"),
