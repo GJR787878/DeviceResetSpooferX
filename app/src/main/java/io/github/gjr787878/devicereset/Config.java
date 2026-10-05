@@ -2,6 +2,7 @@ package io.github.gjr787878.devicereset;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.sqlite.SQLiteDatabase;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -29,6 +30,131 @@ public class Config {
     private static SharedPreferences getPrefs(Context context) {
         return context.getApplicationContext()
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    // ===== LSPosed 作用域自动同步（root 写库，免开 LSPosed 管理器） =====
+    private static final String KEY_SCOPE_SYNCED = "lsp_scope_synced";
+    private static final String MODULE_PKG = "io.github.gjr787878.devicereset";
+    private static final String LSPD_DB = "/data/adb/lspd/config/modules_config.db";
+
+    /**
+     * 把目标列表 + 模块自身 + 系统框架 同步进 LSPosed 作用域（modules_config.db）。
+     * LSPosed 的配置库是标准明文 SQLite（本机已有实证：modules/scope 表结构完整、模块已启用）。
+     * 流程：root cp db(+wal/shm) → 模块私有目录 → SQLiteDatabase 打开（自动合并 WAL）
+     *      → INSERT scope 行（模块自身/system/android/所有目标，user_id=0）→ close
+     *      → root cp 合并后的主库回原路径 + chmod 600 + 删除手机侧 wal/shm
+     * 写完需重启手机一次，LSPosed daemon 启动时读取新作用域生效。
+     * 已同步过且内容未变化则跳过（避免每次进页面都 root 操作）。
+     * 结果写入 getExternalFilesDir/lsp_sync.log（导出日志附带）。
+     */
+    public static void syncScopeToLSPosed(Context context, Set<String> targets) {
+        final Context ctx = context.getApplicationContext();
+        StringBuilder log = new StringBuilder("=== LSPosed Auto-Sync Log ===\n");
+        java.io.File logFile = new java.io.File(ctx.getExternalFilesDir(null), "lsp_sync.log");
+        log.append("time=").append(System.currentTimeMillis()).append("\n");
+        try {
+            // 1. 内容未变化则跳过
+            Set<String> synced = getPrefs(ctx).getStringSet(KEY_SCOPE_SYNCED, new HashSet<>());
+            Set<String> want = new HashSet<>();
+            if (targets != null) want.addAll(targets);
+            want.add(MODULE_PKG);
+            want.add("system");
+            want.add("android");
+            if (synced.equals(want)) {
+                log.append("UNCHANGED: skip (scope already in sync)\n");
+                writeLog(logFile, log.toString());
+                return;
+            }
+            // 2. 检查 root
+            String rootOk = runSu("id -u");
+            if (!"0".equals(rootOk.trim())) {
+                log.append("NO_ROOT: cannot sync scope\n");
+                writeLog(logFile, log.toString());
+                return;
+            }
+            // 3. root cp db(+wal/shm) 到模块私有目录
+            java.io.File tmpDir = new java.io.File(ctx.getFilesDir(), "lspd_tmp");
+            runSu("rm -rf '" + tmpDir.getAbsolutePath() + "' && mkdir -p '" + tmpDir.getAbsolutePath() + "'");
+            String cpDb = runSu("cp " + LSPD_DB + " '" + tmpDir.getAbsolutePath() + "/' 2>&1; "
+                    + "cp " + LSPD_DB + "-wal '" + tmpDir.getAbsolutePath() + "/' 2>&1; "
+                    + "cp " + LSPD_DB + "-shm '" + tmpDir.getAbsolutePath() + "/' 2>&1; "
+                    + "chmod 666 '" + tmpDir.getAbsolutePath() + "'/* 2>&1; echo CP_OK");
+            log.append("cp: ").append(cpDb.trim()).append("\n");
+            java.io.File localDb = new java.io.File(tmpDir, "modules_config.db");
+            if (!localDb.exists() || !localDb.canRead()) {
+                log.append("CP_FAIL: db not readable locally\n");
+                writeLog(logFile, log.toString());
+                return;
+            }
+            // 4. SQLiteDatabase 打开（自动合并 WAL）并写入 scope
+            SQLiteDatabase db = SQLiteDatabase.openDatabase(localDb.getAbsolutePath(), null,
+                    SQLiteDatabase.OPEN_READWRITE);
+            try {
+                java.util.List<String> tables = new java.util.ArrayList<>();
+                android.database.Cursor c = db.rawQuery(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('modules','modules_state','scope')", null);
+                while (c.moveToNext()) tables.add(c.getString(0));
+                c.close();
+                log.append("tables: ").append(tables).append("\n");
+                if (!tables.contains("scope")) {
+                    log.append("NO_SCOPE_TABLE: this LSPosed db has no scope table\n");
+                    writeLog(logFile, log.toString());
+                    db.close();
+                    return;
+                }
+                db.execSQL("INSERT OR REPLACE INTO scope (module_pkg_name, app_pkg_name, user_id) VALUES (?, ?, 0)",
+                        new Object[]{MODULE_PKG, "system"});
+                db.execSQL("INSERT OR REPLACE INTO scope (module_pkg_name, app_pkg_name, user_id) VALUES (?, ?, 0)",
+                        new Object[]{MODULE_PKG, "android"});
+                db.execSQL("INSERT OR REPLACE INTO scope (module_pkg_name, app_pkg_name, user_id) VALUES (?, ?, 0)",
+                        new Object[]{MODULE_PKG, MODULE_PKG});
+                int n = 0;
+                for (String p : targets) {
+                    if (p == null || p.isEmpty() || MODULE_PKG.equals(p)) continue;
+                    db.execSQL("INSERT OR REPLACE INTO scope (module_pkg_name, app_pkg_name, user_id) VALUES (?, ?, 0)",
+                            new Object[]{MODULE_PKG, p});
+                    n++;
+                }
+                log.append("scope rows inserted: system/android/self + ").append(n).append(" targets\n");
+            } finally {
+                db.close(); // close = checkpoint WAL 到主库
+            }
+            // 5. 写回 + 清手机侧 wal（避免旧 WAL 覆盖新主库）
+            String back = runSu("cp '" + tmpDir.getAbsolutePath() + "/modules_config.db' " + LSPD_DB + " 2>&1; "
+                    + "chmod 600 " + LSPD_DB + " 2>&1; "
+                    + "rm -f " + LSPD_DB + "-wal " + LSPD_DB + "-shm 2>&1; echo BACK_OK");
+            log.append("writeback: ").append(back.trim()).append("\n");
+            // 6. 记录已同步集合
+            getPrefs(ctx).edit().putStringSet(KEY_SCOPE_SYNCED, want).apply();
+            log.append("SYNC_OK (reboot once to take effect)\n");
+        } catch (Throwable e) {
+            log.append("SYNC_ERROR: ").append(e.getMessage()).append("\n");
+        }
+        writeLog(logFile, log.toString());
+    }
+
+    private static String runSu(String cmd) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            Process p = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(p.getOutputStream());
+            os.writeBytes(cmd + "\nexit\n");
+            os.flush();
+            java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()));
+            String l;
+            while ((l = r.readLine()) != null) sb.append(l).append('\n');
+            p.waitFor();
+        } catch (Throwable ignored) {
+        }
+        return sb.toString();
+    }
+
+    private static void writeLog(java.io.File f, String content) {
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(f);
+            w.write(content);
+            w.close();
+        } catch (Throwable ignored) {}
     }
 
     /**

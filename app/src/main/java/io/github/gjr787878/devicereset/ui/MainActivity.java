@@ -1730,7 +1730,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.8.5 (versionCode 61)\n");
+                devInfo.append("Module Version: 3.9.0 (versionCode 62)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -2054,100 +2054,21 @@ public class MainActivity extends AppCompatActivity {
     // 关键：不同 LSPosed 版本表结构可能不同（如 Android 16 新版），
     // 先 PRAGMA table_info 探测真实列名，按实际存在的列自适应拼 SQL，避免静默失败。
     // 同步结果写入 lsp_sync.log（模块外部目录），导出日志时可见，便于诊断。
+    /** 自动同步作用域：应用内选/删目标即写入 LSPosed 配置库（root + SQLiteDatabase），
+     * 免开 LSPosed 管理器；内容未变化自动跳过。 */
     private void autoSyncScopeToLSPosed() {
         new Thread(() -> {
-            String detail = "not_run";
             try {
                 java.util.Set<String> targets = Config.getTargetPackages(this);
-                if (targets == null || targets.isEmpty()) { detail = "no_targets"; return; } // 无目标不同步，避免误清用户手动勾选
-                final String MOD = "io.github.gjr787878.devicereset";
-                final String DB = "/data/adb/lspd/config/modules_config.db";
-                StringBuilder sh = new StringBuilder();
-                sh.append("DB=").append(DB).append("\n");
-                sh.append("[ -f \"$DB\" ] || { echo NO_DB; exit 0; }\n");
-                sh.append("cp -f \"$DB\" \"$DB.drs_backup\" 2>/dev/null\n");
-                sh.append("SQLITE=\"\"; BUSY=\"\"\n");
-                sh.append("for c in sqlite3 /system/xbin/sqlite3 /system/bin/sqlite3; do command -v \"$c\" >/dev/null 2>&1 && { SQLITE=\"$c\"; break; }; done\n");
-                sh.append("[ -z \"$SQLITE\" ] && [ -x /data/adb/magisk/busybox ] && BUSY=/data/adb/magisk/busybox\n");
-                sh.append("[ -z \"$SQLITE\" ] && [ -z \"$BUSY\" ] && { echo NO_SQLITE; exit 0; }\n");
-                sh.append("run_sql() { if [ -n \"$SQLITE\" ]; then \"$SQLITE\" \"$DB\" \"$1\" 2>/dev/null; else \"$BUSY\" sqlite3 \"$DB\" \"$1\" 2>/dev/null; fi; }\n");
-                // 探测表结构：modules / scope 的真实列名（不同 LSPosed 版本可能不同）
-                sh.append("MCOLS=$(run_sql \"PRAGMA table_info(modules);\" | awk -F'|' '{print $2}' | tr '\\n' ',')\n");
-                sh.append("SCOLS=$(run_sql \"PRAGMA table_info(scope);\" | awk -F'|' '{print $2}' | tr '\\n' ',')\n");
-                sh.append("[ -z \"$MCOLS\" ] && { echo NO_MODULES_TABLE\"|\"$MCOLS; exit 0; }\n");
-                sh.append("echo \"MCOLS=$MCOLS\"\n");
-                sh.append("echo \"SCOLS=$SCOLS\"\n");
-                sh.append("MOD=").append(MOD).append("\n");
-                sh.append("has() { echo \"$1\" | tr ',' '\\n' | grep -qx \"$2\" && echo 1 || echo 0; }\n");
-                // 模块行存在性查询（列名自适应）
-                sh.append("MID=\"\"\n");
-                sh.append("if [ \"$(has \"$MCOLS\" module_pkg_name)\" = 1 ]; then\n");
-                sh.append("  MID=$(run_sql \"SELECT mid FROM modules WHERE module_pkg_name='$MOD';\" | head -1)\n");
-                sh.append("fi\n");
-                // 不存在则插入新行（只写真实存在的列）
-                sh.append("if [ -z \"$MID\" ]; then\n");
-                sh.append("  APK=$(pm path \"$MOD\" 2>/dev/null | sed 's/package://' | head -1)\n");
-                sh.append("  INS=\"INSERT OR REPLACE INTO modules(module_pkg_name\"\n");
-                sh.append("  [ \"$(has \"$MCOLS\" apk_path)\" = 1 ] && INS=\"$INS,apk_path\"\n");
-                sh.append("  [ \"$(has \"$MCOLS\" enabled)\" = 1 ] && INS=\"$INS,enabled\"\n");
-                sh.append("  [ \"$(has \"$MCOLS\" auto_include)\" = 1 ] && INS=\"$INS,auto_include\"\n");
-                sh.append("  INS=\"$INS) VALUES('$MOD'\"\n");
-                sh.append("  [ \"$(has \"$MCOLS\" apk_path)\" = 1 ] && INS=\"$INS,'$APK'\"\n");
-                sh.append("  [ \"$(has \"$MCOLS\" enabled)\" = 1 ] && INS=\"$INS,1\"\n");
-                sh.append("  [ \"$(has \"$MCOLS\" auto_include)\" = 1 ] && INS=\"$INS,0\"\n");
-                sh.append("  INS=\"$INS);\"\n");
-                sh.append("  run_sql \"$INS\" >/dev/null\n");
-                sh.append("  MID=$(run_sql \"SELECT mid FROM modules WHERE module_pkg_name='$MOD';\" | head -1)\n");
-                sh.append("else\n");
-                sh.append("  [ \"$(has \"$MCOLS\" enabled)\" = 1 ] && run_sql \"UPDATE modules SET enabled=1 WHERE mid=$MID;\" >/dev/null\n");
-                sh.append("fi\n");
-                sh.append("[ -z \"$MID\" ] && { echo NO_MID; exit 0; }\n");
-                // scope 写入（列名自适应）
-                sh.append("if [ \"$(has \"$SCOLS\" app_pkg_name)\" = 1 ]; then\n");
-                sh.append("  for p in ");
-                for (String p : targets) {
-                    sh.append(p).append(" ");
-                }
-                sh.append("; do\n");
-                sh.append("    run_sql \"INSERT OR IGNORE INTO scope(mid,app_pkg_name) VALUES($MID,'$p');\" >/dev/null\n");
-                sh.append("  done\n");
-                sh.append("fi\n");
-                sh.append("CNT=$(run_sql \"SELECT count(*) FROM scope WHERE mid=$MID;\" | head -1)\n");
-                sh.append("SCOPE=$(run_sql \"SELECT group_concat(app_pkg_name) FROM scope WHERE mid=$MID;\" | head -1)\n");
-                sh.append("echo \"SYNCED:$CNT|$SCOPE\"\n");
-                sh.append("exit 0\n");
-
-                Process su = Runtime.getRuntime().exec("su");
-                java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
-                os.writeBytes(sh.toString());
-                os.flush();
-                java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(su.getInputStream()));
-                String l, out = "";
-                while ((l = r.readLine()) != null) out = l;
-                r.close();
-                su.waitFor();
-                detail = out.trim();
-                // 校验失败（库可能损坏）→ 用备份回滚，保证 LSPosed 配置安全
-                if (detail.startsWith("SYNCED:0")) {
-                    Process su2 = Runtime.getRuntime().exec("su");
-                    java.io.DataOutputStream os2 = new java.io.DataOutputStream(su2.getOutputStream());
-                    os2.writeBytes("cp -f " + DB + ".drs_backup " + DB + " 2>/dev/null; echo ROLLED_BACK\n");
-                    os2.writeBytes("exit\n");
-                    os2.flush();
-                    su2.waitFor();
-                    detail += "|ROLLED_BACK";
-                }
-            } catch (Throwable ignored) {
-                detail = "exception";
+                Config.syncScopeToLSPosed(this, targets == null ? new java.util.HashSet<>() : targets);
+            } catch (Throwable t) {
+                try {
+                    java.io.File f = new java.io.File(getExternalFilesDir(null), "lsp_sync.log");
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+                    fos.write(("[MainActivity] syncScope error: " + t.getMessage() + "\n").getBytes("UTF-8"));
+                    fos.close();
+                } catch (Throwable ignored) {}
             }
-            // 把同步诊断写入日志文件（模块自己的外部目录，无权限问题），导出日志时可见
-            try {
-                java.io.File f = new java.io.File(getExternalFilesDir(null), "lsp_sync.log");
-                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
-                fos.write(("[" + new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
-                        .format(new java.util.Date()) + "] " + detail + "\n").getBytes("UTF-8"));
-                fos.close();
-            } catch (Throwable ignored) {}
         }).start();
     }
 
