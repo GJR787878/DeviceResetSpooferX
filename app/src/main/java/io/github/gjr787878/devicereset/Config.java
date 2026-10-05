@@ -14,6 +14,9 @@ import java.util.Set;
 public class Config {
     private static final String PREFS_NAME = "devicereset_config";
     private static final String KEY_TARGET_PACKAGES = "target_packages";
+    /** 已手动设置伪装身份的包名集合（身份主存储，模块通过 XSharedPreferences 读取，UI 无需 Root 读写） */
+    private static final String KEY_IDENTITY_PACKAGES = "identity_packages";
+    private static final String KEY_IDENTITY_PREFIX = "identity_";
     private static final String KEY_AUTO_RESET = "auto_reset_on_clear";
     private static final String KEY_HOOK_ANDROID_ID = "hook_android_id";
     private static final String KEY_HOOK_AD_ID = "hook_ad_id";
@@ -56,6 +59,42 @@ public class Config {
 
     public static boolean isTargetPackage(Context context, String packageName) {
         return getTargetPackages(context).contains(packageName);
+    }
+
+    // ===== 身份主存储（模块配置，手动触发写入，UI 无需 Root） =====
+
+    /** 已手动设置伪装身份的包名集合 */
+    public static Set<String> getIdentityPackages(Context context) {
+        return getPrefs(context).getStringSet(KEY_IDENTITY_PACKAGES, new HashSet<>());
+    }
+
+    public static boolean isIdentityConfigured(Context context, String packageName) {
+        return getIdentityPackages(context).contains(packageName);
+    }
+
+    /** 读取某应用的伪装身份 JSON（未设置返回 null） */
+    public static String getIdentity(Context context, String packageName) {
+        return getPrefs(context).getString(KEY_IDENTITY_PREFIX + packageName, null);
+    }
+
+    /** 写入某应用的伪装身份 JSON（手动触发：点随机/保存） */
+    public static void setIdentity(Context context, String packageName, String json) {
+        Set<String> pkgs = new HashSet<>(getIdentityPackages(context));
+        pkgs.add(packageName);
+        getPrefs(context).edit()
+                .putStringSet(KEY_IDENTITY_PACKAGES, pkgs)
+                .putString(KEY_IDENTITY_PREFIX + packageName, json)
+                .apply();
+    }
+
+    /** 删除某应用的伪装身份（长按删除目标时调用） */
+    public static void removeIdentity(Context context, String packageName) {
+        Set<String> pkgs = new HashSet<>(getIdentityPackages(context));
+        pkgs.remove(packageName);
+        getPrefs(context).edit()
+                .putStringSet(KEY_IDENTITY_PACKAGES, pkgs)
+                .remove(KEY_IDENTITY_PREFIX + packageName)
+                .apply();
     }
 
     // 各开关的getter/setter

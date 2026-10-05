@@ -537,13 +537,13 @@ public class ConfigActivity extends AppCompatActivity {
         boolean isEn = LANG_EN.equals(currentLang);
         String message, positive;
         if (isZh) {
-            message = "版本：3.3.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский";
+            message = "版本：3.4.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский";
             positive = "确定";
         } else if (isEn) {
-            message = "Version: 3.3.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to all apps checked in LSPosed scope.\nSupports 中文 / English / Русский";
+            message = "Version: 3.4.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports 中文 / English / Русский";
             positive = "OK";
         } else {
-            message = "Версия: 3.3.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства после очистки данных приложения.\n\nПрименяется ко всем приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский";
+            message = "Версия: 3.4.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский";
             positive = "ОК";
         }
         new AlertDialog.Builder(this)

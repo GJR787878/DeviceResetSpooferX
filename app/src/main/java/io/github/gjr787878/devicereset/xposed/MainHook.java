@@ -82,11 +82,30 @@ public class MainHook implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {}
             XposedBridge.log("[DeviceReset] externalFilesDir: " + externalFilesDir);
 
-            // 核心：检测哨兵文件，决定本次身份（传入内部+外部两个目录，确保都能写入）
-            Identity identity = SentinelDetector.checkAndGetIdentityByDirs(filesDir, externalFilesDir);
-            XposedBridge.log("[DeviceReset] Identity loaded: androidId=" + identity.androidId
-                    + ", model=" + identity.model
-                    + ", brand=" + identity.brand);
+            // 身份读取优先级：模块配置（手动触发写入）→ 旧哨兵文件（兼容旧版）→ 无身份则不伪装
+            Identity identity = null;
+            String idJson = getPrefString("identity_" + lpparam.packageName);
+            if (idJson != null && idJson.startsWith("{")) {
+                try {
+                    identity = Identity.fromJson(idJson);
+                    if (identity != null) {
+                        XposedBridge.log("[DeviceReset] Identity loaded from module config: androidId=" + identity.androidId
+                                + ", model=" + identity.model + ", brand=" + identity.brand);
+                    }
+                } catch (Throwable parseErr) {
+                    XposedBridge.log("[DeviceReset] parse module-config identity failed: " + parseErr.getMessage());
+                }
+            }
+            if (identity == null) {
+                identity = SentinelDetector.checkAndGetIdentityByDirs(filesDir, externalFilesDir);
+                if (identity == null) {
+                    XposedBridge.log("[DeviceReset] no identity for " + lpparam.packageName
+                            + ", skip hooks (identity must be manually triggered in module UI)");
+                    return;
+                }
+                XposedBridge.log("[DeviceReset] Identity loaded from sentinel: androidId=" + identity.androidId
+                        + ", model=" + identity.model + ", brand=" + identity.brand);
+            }
 
             // 安装所有Hook
             if (hookAndroidId) {
@@ -169,6 +188,15 @@ public class MainHook implements IXposedHookLoadPackage {
         try {
             java.util.Set<String> s = xPrefs.getStringSet(key, null);
             return s != null ? new java.util.HashSet<>(s) : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private String getPrefString(String key) {
+        if (!prefsAvailable || xPrefs == null) return null;
+        try {
+            return xPrefs.getString(key, null);
         } catch (Throwable t) {
             return null;
         }
