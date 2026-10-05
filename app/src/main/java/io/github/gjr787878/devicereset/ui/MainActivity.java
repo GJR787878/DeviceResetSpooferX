@@ -55,6 +55,11 @@ public class MainActivity extends AppCompatActivity {
     private View cachedAppsPage, cachedSettingsPage;
     private GlassButtonDrawable[] hookGlass = new GlassButtonDrawable[7];
     private TextView[] hookTv = new TextView[7];
+    // LSPosed 作用域缓存（libxposed getScope 实时读取），主页蓝点旁显示「作用域✓/未授权」
+    private final java.util.Set<String> scopeCache = new java.util.HashSet<>();
+    private volatile boolean scopeLoaded = false;
+    private volatile boolean scopeConnected = false;
+    private TextView lspStatusTv; // 设置页 LSPosed 框架状态行
 
     // ===== 三语字符串 =====
     private String t(String zh, String en, String ru) {
@@ -75,9 +80,49 @@ public class MainActivity extends AppCompatActivity {
         checkUpdate(false);
     }
 
+    /** 异步读取 LSPosed 作用域到缓存，用于主页显示「作用域✓/未授权」 */
+    private void refreshScopeStatus() {
+        new Thread(() -> {
+            scopeConnected = LSPosedScopeHelper.isConnected();
+            java.util.List<String> sc = LSPosedScopeHelper.getScope();
+            synchronized (scopeCache) {
+                scopeCache.clear();
+                if (sc != null) scopeCache.addAll(sc);
+            }
+            scopeLoaded = true;
+            runOnUiThread(() -> {
+                refreshAppList();
+                if (lspStatusTv != null) {
+                    if (!scopeConnected) {
+                        lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
+                                "LSPosed: not connected (module disabled or old framework)",
+                                "LSPosed: не подключён (модуль выключен или старая версия фреймворка)"));
+                        lspStatusTv.setTextColor(COLOR_GRAY);
+                    } else {
+                        lspStatusTv.setText(t("LSPosed 框架：已连接，作用域 ",
+                                "LSPosed: connected, scope ",
+                                "LSPosed: подключён, область ") + scopeCache.size() + t(" 个应用",
+                                " app(s)",
+                                " приложений"));
+                        lspStatusTv.setTextColor(COLOR_BLUE);
+                    }
+                }
+            });
+        }).start();
+    }
+
+    /** 目标是否在 LSPosed 作用域内（框架已连接才有意义） */
+    private boolean isInScope(String pkg) {
+        synchronized (scopeCache) {
+            return scopeLoaded && scopeConnected && scopeCache.contains(pkg);
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        // 异步刷新 LSPosed 作用域状态（主页可见「作用域✓/未授权」）
+        refreshScopeStatus();
         // 兜底：已连接 libxposed 框架时作用域由 requestScope/removeScope 维护，无需写库；
         // 仅老框架（无 libxposed service）回退 root 写库同步（无目标/非 LSPosed 环境自动跳过，不打扰）
         if (!LSPosedScopeHelper.isConnected()) autoSyncScopeToLSPosed();
@@ -290,6 +335,23 @@ public class MainActivity extends AppCompatActivity {
         dot.setBackground(dotBg);
         dot.setVisibility(hasIdentity ? View.VISIBLE : View.INVISIBLE);
         row.addView(dot, new LinearLayout.LayoutParams(Math.round(12 * d), Math.round(12 * d)));
+
+        // 作用域状态：框架已连接时显示「作用域✓」或「未授权」，一眼看清是否同步到 LSPosed
+        if (scopeLoaded) {
+            TextView scopeTv = new TextView(this);
+            scopeTv.setTextSize(10);
+            if (isInScope(pkg)) {
+                scopeTv.setText(t("作用域✓", "Scoped✓", "В области✓"));
+                scopeTv.setTextColor(COLOR_BLUE);
+            } else {
+                scopeTv.setText(t("未授权", "Not scoped", "Не в области"));
+                scopeTv.setTextColor(COLOR_GRAY);
+            }
+            LinearLayout.LayoutParams scopeLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            scopeLp.leftMargin = Math.round(6 * d);
+            row.addView(scopeTv, scopeLp);
+        }
 
         row.setOnClickListener(v -> showAppDetailDialog(pkg, name));
         // 长按删除：统一玻璃确认弹窗，取消选择并删除身份（哨兵文件 + 模块配置，不卸载应用本身）
@@ -1302,6 +1364,33 @@ public class MainActivity extends AppCompatActivity {
         subLp.topMargin = Math.round(8 * d);
         ll.addView(subtitle, subLp);
 
+        // LSPosed 框架状态（作用域同步是否就绪）
+        addSettingsSection(ll, t("LSPosed 框架", "LSPosed Framework", "Фреймворк LSPosed"), d);
+        lspStatusTv = new TextView(this);
+        lspStatusTv.setText(t("连接中...", "Connecting...", "Подключение..."));
+        lspStatusTv.setTextSize(14);
+        lspStatusTv.setTextColor(COLOR_GRAY);
+        if (scopeLoaded) {
+            if (!scopeConnected) {
+                lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
+                        "LSPosed: not connected (module disabled or old framework)",
+                        "LSPosed: не подключён (модуль выключен или старая версия фреймворка)"));
+                lspStatusTv.setTextColor(COLOR_GRAY);
+            } else {
+                lspStatusTv.setText(t("LSPosed 框架：已连接，作用域 ",
+                        "LSPosed: connected, scope ",
+                        "LSPosed: подключён, область ") + scopeCache.size() + t(" 个应用",
+                        " app(s)",
+                        " приложений"));
+                lspStatusTv.setTextColor(COLOR_BLUE);
+            }
+        }
+        LinearLayout.LayoutParams lspLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lspLp.topMargin = Math.round(6 * d);
+        lspLp.bottomMargin = Math.round(10 * d);
+        ll.addView(lspStatusTv, lspLp);
+
         // 语言
         addSettingsSection(ll, t("语言", "Language", "Язык"), d);
         String langName = LANG_EN.equals(currentLang) ? "English" : LANG_ZH.equals(currentLang) ? "中文" : "Русский";
@@ -1609,7 +1698,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.6.0 (versionCode 52)\n");
+                devInfo.append("Module Version: 3.6.1 (versionCode 53)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1693,7 +1782,10 @@ public class MainActivity extends AppCompatActivity {
                     os.writeBytes("ls -la /data/adb/lspd/ 2>/dev/null\n");
                     os.writeBytes("cat /data/adb/lspd/config/modules_config.json 2>/dev/null | head -100\n");
                     os.writeBytes("echo '--- modules_config.db ---'\n");
-                    os.writeBytes("ls -la /data/adb/lspd/config/modules_config.db 2>/dev/null || echo NO_DB\n");
+                    os.writeBytes("ls -la /data/adb/lspd/config/ 2>/dev/null || echo NO_CONFIG_DIR\n");
+                    os.writeBytes("file /data/adb/lspd/config/modules_config.db 2>/dev/null || echo NO_DB\n");
+                    os.writeBytes("echo '--- find lspd 配置文件 ---'\n");
+                    os.writeBytes("find /data/adb/lspd -maxdepth 3 -name '*.db' -o -name '*.json' -o -name '*.xml' 2>/dev/null\n");
                     os.writeBytes("S=''\n");
                     os.writeBytes("for c in sqlite3 /system/xbin/sqlite3 /system/bin/sqlite3; do command -v \"$c\" >/dev/null 2>&1 && { S=\"$c\"; break; }; done\n");
                     os.writeBytes("[ -z \"$S\" ] && [ -x /data/adb/magisk/busybox ] && S=/data/adb/magisk/busybox\n");
@@ -1708,6 +1800,7 @@ public class MainActivity extends AppCompatActivity {
                     os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT mid,module_pkg_name,enabled FROM modules;\" 2>/dev/null\n");
                     os.writeBytes("  echo '--- real schema (tables/columns) ---'\n");
                     os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \".tables\" 2>/dev/null\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT count(*) FROM sqlite_master;\" 2>/dev/null\n");
                     os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"PRAGMA table_info(modules);\" 2>/dev/null\n");
                     os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"PRAGMA table_info(scope);\" 2>/dev/null\n");
                     os.writeBytes("  echo '--- modules raw rows ---'\n");
@@ -1859,9 +1952,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.6.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
-                        "Version: 3.6.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
-                        "Версия: 3.6.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.6.1\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
+                        "Version: 3.6.1\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
+                        "Версия: 3.6.1\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
