@@ -18,6 +18,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -154,16 +155,31 @@ public class MainActivity extends AppCompatActivity {
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         ll.addView(title);
 
-        // 计数行：左侧手动刷新按钮 + 右侧计数（切换 Tab 不再自动重扫，需要时点刷新）
-        LinearLayout countRow = new LinearLayout(this);
-        countRow.setOrientation(LinearLayout.HORIZONTAL);
-        countRow.setGravity(Gravity.CENTER_VERTICAL);
-        Button btnRefresh = makeGlassBtn("↻", 13);
-        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(
-                Math.round(48 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
-        countRow.addView(btnRefresh, refreshLp);
+        // 操作行：刷新按钮 + 选择应用按钮（缩小）+ 右侧计数，同一行
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        // 刷新：圆形玻璃按钮
+        Button btnRefresh = new Button(this);
+        btnRefresh.setText("↻");
+        btnRefresh.setTextSize(15);
+        btnRefresh.setTextColor(COLOR_WHITE);
+        btnRefresh.setAllCaps(false);
+        btnRefresh.setBackground(new GlassButtonDrawable(22 * d, 1 * d, false));
+        actionRow.addView(btnRefresh, new LinearLayout.LayoutParams(
+                Math.round(44 * d), Math.round(44 * d)));
         btnRefresh.setOnClickListener(v -> refreshAppList());
 
+        // 选择应用：缩小的玻璃胶囊按钮
+        Button btnAddApp = makeGlassBtn(t("＋ 选择应用", "＋ Select App", "＋ Выбрать"), 12);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        addLp.leftMargin = Math.round(10 * d);
+        actionRow.addView(btnAddApp, addLp);
+        btnAddApp.setOnClickListener(v -> showAllAppsPicker());
+
+        // 计数：右侧
         appCountText = new TextView(this);
         appCountText.setText("");
         appCountText.setTextSize(13);
@@ -172,19 +188,12 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         countLp.leftMargin = Math.round(10 * d);
-        countRow.addView(appCountText, countLp);
-        LinearLayout.LayoutParams countRowLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        countRowLp.topMargin = Math.round(8 * d);
-        ll.addView(countRow, countRowLp);
+        actionRow.addView(appCountText, countLp);
 
-        // 应用内直接选择任意已安装应用（选中即写入模块目标配置，无需先在 LSPosed 里逐个选择）
-        Button btnAddApp = makeGlassBtn(t("＋ 选择应用（全部应用）", "＋ Select App (All Apps)", "＋ Выбрать приложение (все)"), 13);
-        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams actionRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        addLp.topMargin = Math.round(12 * d);
-        ll.addView(btnAddApp, addLp);
-        btnAddApp.setOnClickListener(v -> showAllAppsPicker());
+        actionRowLp.topMargin = Math.round(8 * d);
+        ll.addView(actionRow, actionRowLp);
 
         appListContainer = new LinearLayout(this);
         appListContainer.setOrientation(LinearLayout.VERTICAL);
@@ -267,24 +276,22 @@ public class MainActivity extends AppCompatActivity {
         row.addView(dot, new LinearLayout.LayoutParams(Math.round(12 * d), Math.round(12 * d)));
 
         row.setOnClickListener(v -> showAppDetailDialog(pkg, name));
-        // 长按删除：取消选择该目标应用并删除身份哨兵文件（不卸载应用本身）
+        // 长按删除：统一玻璃确认弹窗，取消选择并删除身份哨兵文件（不卸载应用本身）
         row.setOnLongClickListener(v -> {
-            new AlertDialog.Builder(this)
-                    .setTitle(t("删除目标应用", "Remove Target App", "Удалить приложение"))
-                    .setMessage(t("确定删除「", "Remove \"", "Удалить «") + name
+            showGlassConfirm(
+                    t("删除目标应用", "Remove Target App", "Удалить приложение"),
+                    t("确定删除「", "Remove \"", "Удалить «") + name
                             + t("」？将取消选择并删除其身份哨兵文件（不会卸载应用本身）。",
                                 "\"? It will be deselected and its identity sentinel files deleted (the app itself is not uninstalled).",
-                                "»? Приложение будет убрано из целей, сторожевые файлы удалены (само приложение не удаляется)."))
-                    .setPositiveButton(t("删除", "Remove", "Удалить"), (dd, w) -> {
+                                "»? Приложение будет убрано из целей, сторожевые файлы удалены (само приложение не удаляется)."),
+                    t("删除", "Remove", "Удалить"), true, () -> {
                         Config.removeTargetPackage(this, pkg);
                         deleteIdentityFiles(pkg);
                         refreshAppList();
                         Toast.makeText(this,
                                 t("已删除: ", "Removed: ", "Удалено: ") + name,
                                 Toast.LENGTH_SHORT).show();
-                    })
-                    .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
-                    .show();
+                    });
             return true;
         });
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
@@ -427,6 +434,78 @@ public class MainActivity extends AppCompatActivity {
         float d = getResources().getDisplayMetrics().density;
         b.setBackground(new GlassButtonDrawable(24 * d, 1 * d, false));
         return b;
+    }
+
+    /** 统一的玻璃风格确认弹窗：标题 + 说明 + 取消/确认 两个玻璃胶囊按钮 */
+    interface ConfirmCallback { void onConfirm(); }
+    private void showGlassConfirm(String titleText, String message, String positiveText,
+                                  boolean emphasize, ConfirmCallback cb) {
+        final float d = getResources().getDisplayMetrics().density;
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(Math.round(20 * d), Math.round(20 * d), Math.round(20 * d), Math.round(18 * d));
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(COLOR_DIALOG_BG);
+        rootBg.setCornerRadius(24 * d);
+        rootBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        root.setBackground(rootBg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(titleText);
+        tvTitle.setTextSize(17);
+        tvTitle.setTextColor(COLOR_WHITE);
+        tvTitle.setTypeface(tvTitle.getTypeface(), android.graphics.Typeface.BOLD);
+        root.addView(tvTitle);
+
+        if (message != null && message.length() > 0) {
+            TextView tvMsg = new TextView(this);
+            tvMsg.setText(message);
+            tvMsg.setTextSize(14);
+            tvMsg.setTextColor(COLOR_GRAY);
+            tvMsg.setLineSpacing(4, 1);
+            LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            msgLp.topMargin = Math.round(12 * d);
+            root.addView(tvMsg, msgLp);
+        }
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams btnRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnRowLp.topMargin = Math.round(18 * d);
+
+        Button btnCancel = makeGlassBtn(t("取消", "Cancel", "Отмена"), 14);
+        btnRow.addView(btnCancel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
+
+        Button btnOk = new Button(this);
+        btnOk.setText(positiveText);
+        btnOk.setTextSize(14);
+        btnOk.setTextColor(emphasize ? COLOR_BLUE : COLOR_WHITE);
+        btnOk.setAllCaps(false);
+        btnOk.setBackground(new GlassButtonDrawable(24 * d, emphasize ? 2 * d : 1 * d, emphasize));
+        LinearLayout.LayoutParams okLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        okLp.leftMargin = Math.round(10 * d);
+        btnRow.addView(btnOk, okLp);
+        btnOk.setOnClickListener(v -> {
+            dialog.dismiss();
+            cb.onConfirm();
+        });
+
+        root.addView(btnRow, btnRowLp);
+        dialog.setContentView(root);
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x88000000));
+            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
     }
 
     // ===== 自定义界面 =====
@@ -677,12 +756,30 @@ public class MainActivity extends AppCompatActivity {
         rootBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
         root.setBackground(rootBg);
 
+        // 标题行：标题 + 右侧筛选按钮（小方形玻璃按钮，弹出 系统应用/安装应用 选项）
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
         title.setText(t("选择目标应用", "Select Target App", "Выберите приложение"));
         title.setTextSize(18);
         title.setTextColor(COLOR_WHITE);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
-        root.addView(title);
+        titleRow.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        final Button btnFilter = new Button(this);
+        btnFilter.setText(t("筛选 ▾", "Filter ▾", "Фильтр ▾"));
+        btnFilter.setTextSize(12);
+        btnFilter.setTextColor(COLOR_WHITE);
+        btnFilter.setAllCaps(false);
+        final GlassButtonDrawable filterGlass = new GlassButtonDrawable(16 * d, 1 * d, false);
+        btnFilter.setBackground(filterGlass);
+        titleRow.addView(btnFilter, new LinearLayout.LayoutParams(
+                Math.round(76 * d), ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(titleRow);
+
+        // 筛选模式：0=全部, 1=系统应用, 2=安装应用
+        final int[] filterMode = {0};
 
         // 搜索框（胶囊样式，与输入框统一）
         final EditText search = new EditText(this);
@@ -736,6 +833,43 @@ public class MainActivity extends AppCompatActivity {
         }
         dialog.show();
 
+        // 筛选小方形弹窗（锚定筛选按钮，同位置弹出）
+        btnFilter.setOnClickListener(vv -> {
+            LinearLayout pop = new LinearLayout(this);
+            pop.setOrientation(LinearLayout.VERTICAL);
+            pop.setPadding(Math.round(6 * d), Math.round(6 * d), Math.round(6 * d), Math.round(6 * d));
+            GradientDrawable popBg = new GradientDrawable();
+            popBg.setColor(0xFF2C2C2E);
+            popBg.setCornerRadius(16 * d);
+            popBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+            pop.setBackground(popBg);
+
+            String[] optTexts = {t("系统应用", "System apps", "Системные приложения"),
+                    t("安装应用", "Installed apps", "Установленные приложения")};
+            final int[] optModes = {1, 2};
+            for (int oi = 0; oi < 2; oi++) {
+                TextView o = new TextView(this);
+                o.setText(optTexts[oi] + (filterMode[0] == optModes[oi] ? "  ✓" : ""));
+                o.setTextSize(14);
+                o.setTextColor(filterMode[0] == optModes[oi] ? COLOR_BLUE : COLOR_WHITE);
+                o.setPadding(Math.round(14 * d), Math.round(10 * d), Math.round(14 * d), Math.round(10 * d));
+                final int mm = optModes[oi];
+                o.setOnClickListener(vo -> {
+                    // 再次点同一项则取消筛选回到全部
+                    filterMode[0] = (filterMode[0] == mm) ? 0 : mm;
+                    filterGlass.setGlassSelected(filterMode[0] != 0);
+                    applyPickerFilter(list, emptyTv, search, filterMode);
+                    pw.dismiss();
+                });
+                pop.addView(o);
+            }
+            final PopupWindow pw = new PopupWindow(pop,
+                    Math.round(172 * d), ViewGroup.LayoutParams.WRAP_CONTENT, true);
+            pw.setOutsideTouchable(true);
+            pw.setElevation(8 * d);
+            pw.showAsDropDown(btnFilter, 0, Math.round(6 * d));
+        });
+
         // 后台加载全部已安装应用（含图标）
         new Thread(() -> {
             try {
@@ -748,8 +882,9 @@ public class MainActivity extends AppCompatActivity {
                     CharSequence l = pm.getApplicationLabel(ai);
                     android.graphics.drawable.Drawable ic;
                     try { ic = pm.getApplicationIcon(ai); } catch (Throwable t2) { ic = null; }
+                    boolean isSystem = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
                     entries.add(new AppEntry(l != null && l.length() > 0 ? l.toString() : ai.packageName,
-                            ai.packageName, ic));
+                            ai.packageName, ic, isSystem));
                 }
                 java.util.Collections.sort(entries, (a, b) -> a.label.compareToIgnoreCase(b.label));
                 final java.util.Set<String> already = Config.getTargetPackages(this);
@@ -760,7 +895,7 @@ public class MainActivity extends AppCompatActivity {
                         row.setGravity(Gravity.CENTER_VERTICAL);
                         row.setPadding(Math.round(12 * d), Math.round(10 * d), Math.round(12 * d), Math.round(10 * d));
                         row.setBackground(new GlassButtonDrawable(20 * d, 1 * d, false));
-                        row.setTag((e.label + " " + e.pkg).toLowerCase());
+                        row.setTag(new RowTag((e.label + " " + e.pkg).toLowerCase(), e.system));
 
                         ImageView ic = new ImageView(this);
                         ic.setLayoutParams(new LinearLayout.LayoutParams(Math.round(36 * d), Math.round(36 * d)));
@@ -789,19 +924,11 @@ public class MainActivity extends AppCompatActivity {
                         rLp.bottomMargin = Math.round(8 * d);
                         list.addView(row, rLp);
                     }
-                    // 搜索过滤
+                    // 搜索过滤（与系统/安装筛选共用统一过滤逻辑）
                     search.addTextChangedListener(new android.text.TextWatcher() {
                         public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
                         public void onTextChanged(CharSequence s, int a, int b, int c) {
-                            String q = s.toString().toLowerCase();
-                            int shown = 0;
-                            for (int i = 0; i < list.getChildCount(); i++) {
-                                View child = list.getChildAt(i);
-                                boolean match = q.isEmpty() || String.valueOf(child.getTag()).contains(q);
-                                child.setVisibility(match ? View.VISIBLE : View.GONE);
-                                if (match) shown++;
-                            }
-                            emptyTv.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
+                            applyPickerFilter(list, emptyTv, search, filterMode);
                         }
                         public void afterTextChanged(android.text.Editable s) {}
                     });
@@ -810,6 +937,22 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
         }).start();
+    }
+
+    /** 选择器筛选：搜索文本 + 系统/安装类型共同决定每行可见性 */
+    private void applyPickerFilter(LinearLayout list, TextView emptyTv, EditText search, int[] filterMode) {
+        String q = search.getText().toString().toLowerCase();
+        int shown = 0;
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View child = list.getChildAt(i);
+            RowTag rt = (RowTag) child.getTag();
+            boolean textOk = q.isEmpty() || rt.text.contains(q);
+            boolean typeOk = filterMode[0] == 0 || (filterMode[0] == 1 ? rt.system : !rt.system);
+            boolean ok = textOk && typeOk;
+            child.setVisibility(ok ? View.VISIBLE : View.GONE);
+            if (ok) shown++;
+        }
+        emptyTv.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
     }
 
     /** 选择器点选：写入目标配置，缺身份则生成，刷新列表并关闭弹窗 */
@@ -835,10 +978,22 @@ public class MainActivity extends AppCompatActivity {
     private static class AppEntry {
         final String label, pkg;
         final android.graphics.drawable.Drawable icon;
-        AppEntry(String label, String pkg, android.graphics.drawable.Drawable icon) {
+        final boolean system;
+        AppEntry(String label, String pkg, android.graphics.drawable.Drawable icon, boolean system) {
             this.label = label;
             this.pkg = pkg;
             this.icon = icon;
+            this.system = system;
+        }
+    }
+
+    /** 选择器行标签：搜索文本 + 是否系统应用 */
+    private static class RowTag {
+        final String text;
+        final boolean system;
+        RowTag(String text, boolean system) {
+            this.text = text;
+            this.system = system;
         }
     }
 
@@ -925,43 +1080,108 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable ignored) {}
     }
 
-    /** 手动清空某应用数据并重启（输入包名） */
+    /** 手动清空某应用数据并重启（自定义玻璃弹窗） */
     private void showClearDataDialog() {
+        final float d = getResources().getDisplayMetrics().density;
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(Math.round(20 * d), Math.round(20 * d), Math.round(20 * d), Math.round(18 * d));
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(COLOR_DIALOG_BG);
+        rootBg.setCornerRadius(24 * d);
+        rootBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        root.setBackground(rootBg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(t("清空目标应用数据并重启", "Clear Target App Data & Restart", "Очистить данные приложения и перезапустить"));
+        tvTitle.setTextSize(17);
+        tvTitle.setTextColor(COLOR_WHITE);
+        tvTitle.setTypeface(tvTitle.getTypeface(), android.graphics.Typeface.BOLD);
+        root.addView(tvTitle);
+
+        TextView tvMsg = new TextView(this);
+        tvMsg.setText(t("将清空目标应用的缓存、数据库、偏好设置（保留身份哨兵），并强制停止后重启，使当前身份立即生效。",
+                "Clears the target app's cache, databases and prefs (identity sentinel is kept), force-stops and restarts it so the current identity takes effect immediately.",
+                "Очищает кэш, базы данных и настройки целевого приложения (сторожевой файл сохраняется), принудительно останавливает и перезапускает его."));
+        tvMsg.setTextSize(14);
+        tvMsg.setTextColor(COLOR_GRAY);
+        tvMsg.setLineSpacing(4, 1);
+        LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        msgLp.topMargin = Math.round(12 * d);
+        root.addView(tvMsg, msgLp);
+
+        // 包名输入框（胶囊样式）
         final EditText input = new EditText(this);
         input.setHint(t("输入应用包名，如 com.example.app", "Enter package name, e.g. com.example.app", "Введите имя пакета, например com.example.app"));
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(48, 24, 48, 24);
-        layout.addView(input);
-        new AlertDialog.Builder(this)
-                .setTitle(t("清空目标应用数据并重启", "Clear Target App Data & Restart", "Очистить данные приложения и перезапустить"))
-                .setMessage(t("将清空目标应用的缓存、数据库、偏好设置（保留身份哨兵），并强制停止后重启，使当前身份立即生效。",
-                        "Clears the target app's cache, databases and prefs (identity sentinel is kept), force-stops and restarts it so the current identity takes effect immediately.",
-                        "Очищает кэш, базы данных и настройки целевого приложения (сторожевой файл сохраняется), принудительно останавливает и перезапускает его."))
-                .setView(layout)
-                .setPositiveButton(t("清空", "Clear", "Очистить"), (d, w) -> {
-                    String pkg = input.getText().toString().trim();
-                    if (pkg.isEmpty()) {
-                        Toast.makeText(this, t("请输入包名", "Please enter package name", "Введите имя пакета"), Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    new Thread(() -> {
-                        String json = readIdentityFile(pkg);
-                        if (json == null || !json.startsWith("{")) {
-                            Identity nid = IdentityGenerator.generateRandom();
-                            IdentityGenerator.fillMissing(nid);
-                            json = nid.toJson();
-                        }
-                        final String fjson = json;
-                        final boolean ok = clearTargetAppData(pkg, fjson);
-                        runOnUiThread(() -> Toast.makeText(this, ok
-                                ? t("已清空并重启: ", "Cleared & restarted: ", "Очищено и перезапущено: ") + pkg
-                                : t("清空失败，请确认已授予ROOT权限", "Clear failed, ensure ROOT access", "Ошибка, проверьте Root-права"),
-                                Toast.LENGTH_LONG).show());
-                    }).start();
-                })
-                .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
-                .show();
+        input.setTextSize(14);
+        input.setTextColor(COLOR_WHITE);
+        input.setSingleLine(true);
+        GradientDrawable iBg = new GradientDrawable();
+        iBg.setColor(0x221C1C1E);
+        iBg.setCornerRadius(20 * d);
+        iBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        input.setBackground(iBg);
+        input.setPadding(Math.round(14 * d), Math.round(10 * d), Math.round(14 * d), Math.round(10 * d));
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        inputLp.topMargin = Math.round(14 * d);
+        root.addView(input, inputLp);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams btnRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnRowLp.topMargin = Math.round(18 * d);
+
+        Button btnCancel = makeGlassBtn(t("取消", "Cancel", "Отмена"), 14);
+        btnRow.addView(btnCancel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
+
+        Button btnClear = new Button(this);
+        btnClear.setText(t("清空", "Clear", "Очистить"));
+        btnClear.setTextSize(14);
+        btnClear.setTextColor(COLOR_BLUE);
+        btnClear.setAllCaps(false);
+        btnClear.setBackground(new GlassButtonDrawable(24 * d, 2 * d, true));
+        LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        clearLp.leftMargin = Math.round(10 * d);
+        btnRow.addView(btnClear, clearLp);
+
+        btnClear.setOnClickListener(v -> {
+            final String pkg = input.getText().toString().trim();
+            if (pkg.isEmpty()) {
+                Toast.makeText(this, t("请输入包名", "Please enter package name", "Введите имя пакета"), Toast.LENGTH_SHORT).show();
+                return;
+            }
+            dialog.dismiss();
+            new Thread(() -> {
+                String json = readIdentityFile(pkg);
+                if (json == null || !json.startsWith("{")) {
+                    Identity nid = IdentityGenerator.generateRandom();
+                    IdentityGenerator.fillMissing(nid);
+                    json = nid.toJson();
+                }
+                final String fjson = json;
+                final boolean ok = clearTargetAppData(pkg, fjson);
+                runOnUiThread(() -> Toast.makeText(this, ok
+                        ? t("已清空并重启: ", "Cleared & restarted: ", "Очищено и перезапущено: ") + pkg
+                        : t("清空失败，请确认已授予ROOT权限", "Clear failed, ensure ROOT access", "Ошибка, проверьте Root-права"),
+                        Toast.LENGTH_LONG).show());
+            }).start();
+        });
+
+        root.addView(btnRow, btnRowLp);
+        dialog.setContentView(root);
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x88000000));
+            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
     }
 
     // ===== 设置页 =====
@@ -1285,7 +1505,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.2.0 (versionCode 46)\n");
+                devInfo.append("Module Version: 3.3.0 (versionCode 47)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1481,9 +1701,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.2.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
-                        "Version: 3.2.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
-                        "Версия: 3.2.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется к приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.3.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
+                        "Version: 3.3.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
+                        "Версия: 3.3.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется к приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
