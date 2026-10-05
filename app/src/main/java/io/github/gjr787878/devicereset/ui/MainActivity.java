@@ -1044,29 +1044,55 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 清空目标应用数据（缓存/数据库/偏好等，保留 .identity_sentinel / .identity_runtime），
-     * 然后强停并重启应用。效果等价于手动「设置→存储→清除数据」，
-     * 但身份哨兵保留，模块下次启动会按哨兵应用当前身份，立即生效。
+     * 清空目标应用全部数据：优先用官方 `pm clear <pkg>`（等价「设置→存储→清除数据」，
+     * 参考 Android 官方 adb 文档；内含强停、自动处理多用户/SDK36 数据目录），
+     * 失败才回退手动删除各数据目录。
+     * 身份哨兵先备份、清空后再恢复（pm clear 会清掉 files/ 下所有文件），
+     * 保证清数据后伪装身份依然生效；不自动打开目标应用。
      */
     private boolean clearTargetAppData(String pkg, String identityJson) {
         try {
-            // 1. 确保身份三处一致（配置+内部哨兵+外部哨兵），清数据后依然按当前身份生效
+            // 1. 先确保身份三处一致（配置+内部哨兵+外部哨兵）
             writeIdentityAll(pkg, identityJson);
-            // 2. 强停应用
-            String dataDir = "/data/user/0/" + pkg;
-            Process su = Runtime.getRuntime().exec("su");
-            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
-            os.writeBytes("am force-stop " + pkg + " 2>/dev/null\n");
-            // 3. 清缓存/数据库/偏好/网页缓存（保留 files/ 下的身份文件）
-            os.writeBytes("rm -rf " + dataDir + "/cache " + dataDir + "/code_cache "
-                    + dataDir + "/databases " + dataDir + "/shared_prefs "
-                    + dataDir + "/no_backup " + dataDir + "/app_webview 2>/dev/null\n");
-            os.writeBytes("for f in " + dataDir + "/files/*; do b=$(basename \"$f\"); "
-                    + "[ \"$b\" = \".identity_sentinel\" ] || [ \"$b\" = \".identity_runtime\" ] || rm -rf \"$f\"; done 2>/dev/null\n");
-            os.writeBytes("exit\n");
-            os.flush();
-            su.waitFor();
-            // 4. 不再自动打开目标应用：保持停止状态，用户下次手动打开时模块按哨兵身份生效
+            // 2. 备份哨兵内容（pm clear 会连 files/ 一起清空）
+            String backup = readIdentityFile(pkg);
+            // 3. 官方接口清除全部数据；失败回退手动删除
+            boolean cleared = false;
+            try {
+                Process su = Runtime.getRuntime().exec("su");
+                java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+                os.writeBytes("pm clear " + pkg + "\n");
+                os.writeBytes("exit\n");
+                os.flush();
+                int rc = su.waitFor();
+                java.io.BufferedReader br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(su.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String l;
+                while ((l = br.readLine()) != null) sb.append(l);
+                cleared = (rc == 0) && !sb.toString().contains("Error");
+            } catch (Throwable ignored) {}
+            if (!cleared) {
+                // 兜底：手动清缓存/数据库/偏好/网页缓存（保留 files/ 下的身份文件）
+                String dataDir = "/data/user/0/" + pkg;
+                Process su2 = Runtime.getRuntime().exec("su");
+                java.io.DataOutputStream os2 = new java.io.DataOutputStream(su2.getOutputStream());
+                os2.writeBytes("am force-stop " + pkg + " 2>/dev/null\n");
+                os2.writeBytes("rm -rf " + dataDir + "/cache " + dataDir + "/code_cache "
+                        + dataDir + "/databases " + dataDir + "/shared_prefs "
+                        + dataDir + "/no_backup " + dataDir + "/app_webview 2>/dev/null\n");
+                os2.writeBytes("for f in " + dataDir + "/files/*; do b=$(basename \"$f\"); "
+                        + "[ \"$b\" = \".identity_sentinel\" ] || [ \"$b\" = \".identity_runtime\" ] || rm -rf \"$f\"; done 2>/dev/null\n");
+                os2.writeBytes("exit\n");
+                os2.flush();
+                su2.waitFor();
+            }
+            // 4. 恢复身份哨兵（内部+外部），清数据后模块依然按哨兵身份生效
+            if (backup != null && backup.startsWith("{")) {
+                writeIdentityFile(pkg, backup);
+                writeExternalIdentityFile(pkg, backup);
+            }
+            // 5. 不自动打开目标应用：保持停止状态（pm clear 已强停），用户下次手动打开时生效
             return true;
         } catch (Throwable t) {
             return false;
