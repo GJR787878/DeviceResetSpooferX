@@ -2,6 +2,7 @@ package io.github.gjr787878.devicereset.ui;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -158,6 +159,14 @@ public class MainActivity extends AppCompatActivity {
         countLp.topMargin = Math.round(8 * d);
         ll.addView(appCountText, countLp);
 
+        // 应用内直接选择任意已安装应用（选中即写入模块目标配置，无需先在 LSPosed 里逐个选择）
+        Button btnAddApp = makeGlassBtn(t("＋ 选择应用（全部应用）", "＋ Select App (All Apps)", "＋ Выбрать приложение (все)"), 13);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        addLp.topMargin = Math.round(12 * d);
+        ll.addView(btnAddApp, addLp);
+        btnAddApp.setOnClickListener(v -> showAllAppsPicker());
+
         appListContainer = new LinearLayout(this);
         appListContainer.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
@@ -250,6 +259,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAppDetailDialog(String pkg, String appName) {
         String json = readIdentityFile(pkg);
         if (json == null) { Toast.makeText(this, t("读取失败", "Read failed", "Ошибка чтения"), Toast.LENGTH_SHORT).show(); return; }
+        // 在图三/图四中打开某应用即视为选中目标应用（同步到模块配置，MainHook 只对目标生效）
+        getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
+        Config.addTargetPackage(this, pkg);
         Identity id = Identity.fromJson(json);
         if (id == null) { Toast.makeText(this, t("解析失败", "Parse failed", "Ошибка парсинга"), Toast.LENGTH_SHORT).show(); return; }
 
@@ -347,8 +359,17 @@ public class MainActivity extends AppCompatActivity {
         btnBack.setOnClickListener(v -> dialog.dismiss());
         btnRandom.setOnClickListener(v -> {
             Identity newId = IdentityGenerator.generateRandom();
-            writeIdentityFile(pkg, newId.toJson());
-            Toast.makeText(this, t("已生成随机身份", "Random identity generated", "Случайная идентичность создана"), Toast.LENGTH_SHORT).show();
+            String json = newId.toJson();
+            writeIdentityFile(pkg, json);
+            writeExternalIdentityFile(pkg, json);
+            boolean cleared = false;
+            if (isAutoClearAfterSave()) {
+                cleared = clearTargetAppData(pkg, json);
+            }
+            Toast.makeText(this, cleared
+                            ? t("已生成随机身份并清空目标应用数据，已重启", "Random identity generated, app data cleared & restarted", "Случайная идентичность создана, данные очищены и приложение перезапущено")
+                            : t("已生成随机身份（如未生效请在设置页开启自动清空数据）", "Random identity generated (enable auto-clear in Settings if not applied)", "Случайная идентичность создана"),
+                    Toast.LENGTH_LONG).show();
             dialog.dismiss();
             refreshAppList();
         });
@@ -375,6 +396,8 @@ public class MainActivity extends AppCompatActivity {
     private void showCustomizeDialog(String pkg, String appName, Identity currentId) {
         float d = getResources().getDisplayMetrics().density;
         final Identity[] workingId = {currentId != null ? currentId : IdentityGenerator.generateRandom()};
+        // 修复：IMSI/ICCID 等字段默认空的问题 —— 缺什么补什么（用随机值补齐，其余保持用户已填内容）
+        IdentityGenerator.fillMissing(workingId[0]);
 
         Dialog dialog = new Dialog(this, android.R.style.Theme_Translucent_NoTitleBar);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -425,13 +448,13 @@ public class MainActivity extends AppCompatActivity {
         addFieldRow(form, t("MAC地址", "MAC Address", "MAC-адрес"), workingId[0].macAddress, d, val -> workingId[0].macAddress = val, true);
 
         addSectionLabel(form, t("Build信息", "Build Info", "Build инфо"), d);
-        addFieldRow(form, "Build ID", workingId[0].buildId, d, val -> workingId[0].buildId = val, false);
-        addFieldRow(form, "Bootloader", workingId[0].bootloader, d, val -> workingId[0].bootloader = val, false);
-        addFieldRow(form, t("Radio版本", "Radio Version", "Версия Radio"), workingId[0].radioVersion, d, val -> workingId[0].radioVersion = val, false);
+        addFieldRow(form, "Build ID", workingId[0].buildId, d, val -> workingId[0].buildId = val, true);
+        addFieldRow(form, "Bootloader", workingId[0].bootloader, d, val -> workingId[0].bootloader = val, true);
+        addFieldRow(form, t("Radio版本", "Radio Version", "Версия Radio"), workingId[0].radioVersion, d, val -> workingId[0].radioVersion = val, true);
 
         addSectionLabel(form, t("SIM信息", "SIM Info", "SIM инфо"), d);
-        addFieldRow(form, "IMSI", workingId[0].imsi, d, val -> workingId[0].imsi = val, false);
-        addFieldRow(form, "ICCID", workingId[0].iccid, d, val -> workingId[0].iccid = val, false);
+        addFieldRow(form, "IMSI", workingId[0].imsi, d, val -> workingId[0].imsi = val, true);
+        addFieldRow(form, "ICCID", workingId[0].iccid, d, val -> workingId[0].iccid = val, true);
 
         sv.addView(form);
         root.addView(sv, svLp);
@@ -457,8 +480,20 @@ public class MainActivity extends AppCompatActivity {
 
         btnCancel.setOnClickListener(v -> dialog.dismiss());
         btnSave.setOnClickListener(v -> {
-            writeIdentityFile(pkg, workingId[0].toJson());
-            Toast.makeText(this, t("身份已保存", "Identity saved", "Идентичность сохранена"), Toast.LENGTH_SHORT).show();
+            Identity toSave = workingId[0];
+            // 保存前补齐缺失字段，避免存出空值
+            IdentityGenerator.fillMissing(toSave);
+            String json = toSave.toJson();
+            writeIdentityFile(pkg, json);
+            writeExternalIdentityFile(pkg, json);
+            boolean cleared = false;
+            if (isAutoClearAfterSave()) {
+                cleared = clearTargetAppData(pkg, json);
+            }
+            Toast.makeText(this, cleared
+                            ? t("身份已保存并清空目标应用数据，已重启", "Identity saved, app data cleared & restarted", "Идентичность сохранена, данные очищены и приложение перезапущено")
+                            : t("身份已保存（如未生效请在设置页开启自动清空数据）", "Identity saved (enable auto-clear in Settings if not applied)", "Идентичность сохранена"),
+                    Toast.LENGTH_LONG).show();
             dialog.dismiss();
             refreshAppList();
         });
@@ -478,19 +513,24 @@ public class MainActivity extends AppCompatActivity {
         et.setTextSize(13);
         et.setTextColor(COLOR_WHITE);
         et.setHintTextColor(0x66FFFFFF);
-        et.setBackgroundColor(0x22FFFFFF);
-        et.setPadding(Math.round(12 * d), Math.round(10 * d), Math.round(12 * d), Math.round(10 * d));
+        // 胶囊圆角输入框：半透明玻璃底 + 1px 亮描边 + 全圆角，与玻璃按钮风格统一
+        GradientDrawable etBg = new GradientDrawable();
+        etBg.setColor(0x221C1C1E);
+        etBg.setCornerRadius(20 * d);
+        etBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        et.setBackground(etBg);
+        et.setPadding(Math.round(14 * d), Math.round(10 * d), Math.round(14 * d), Math.round(10 * d));
         LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         row.addView(et, etLp);
 
         if (canRandom) {
             Button rnd = makeGlassBtn(t("随机", "Rnd", "Случ"), 11);
-            LinearLayout.LayoutParams rndLp = new LinearLayout.LayoutParams(Math.round(60 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
-            rndLp.leftMargin = Math.round(8 * d);
+            LinearLayout.LayoutParams rndLp = new LinearLayout.LayoutParams(Math.round(64 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
+            rndLp.leftMargin = Math.round(10 * d);
             row.addView(rnd, rndLp);
             rnd.setOnClickListener(v -> {
                 Identity tmp = IdentityGenerator.generateRandom();
-                String newVal = "?";
+                String newVal = null;
                 if ("Android ID".equals(label)) newVal = tmp.androidId;
                 else if (label.contains("Ad ID") || label.contains("广告")) newVal = tmp.advertisingId;
                 else if ("AppSet ID".equals(label)) newVal = tmp.appSetId;
@@ -499,7 +539,13 @@ public class MainActivity extends AppCompatActivity {
                 else if ("MEID".equals(label)) newVal = tmp.meid;
                 else if (label.contains("Serial") || label.contains("序列")) newVal = tmp.serial;
                 else if (label.contains("MAC")) newVal = tmp.macAddress;
-                et.setText(newVal);
+                else if ("Build ID".equals(label)) newVal = tmp.buildId;
+                else if ("Bootloader".equals(label)) newVal = tmp.bootloader;
+                else if (label.contains("Radio")) newVal = tmp.radioVersion;
+                else if ("IMSI".equals(label)) newVal = tmp.imsi;
+                else if ("ICCID".equals(label)) newVal = tmp.iccid;
+                // 修复：不再默认填 "?" —— 匹配不到则保持原值
+                if (newVal != null) et.setText(newVal);
             });
         }
         et.setOnFocusChangeListener((v, hasFocus) -> {
@@ -573,6 +619,177 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable e) {
             Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ===== 应用内选择任意应用 =====
+
+    /** 列出全部带桌面入口的已安装应用，选中即添加为目标应用（生成身份 + 写入模块配置） */
+    private void showAllAppsPicker() {
+        final String loadingTitle = t("正在扫描", "Scanning", "Сканирование");
+        final String loadingMsg = t("正在加载全部应用...", "Loading all apps...", "Загрузка приложений...");
+        AlertDialog loading = new AlertDialog.Builder(this)
+                .setTitle(loadingTitle)
+                .setMessage(loadingMsg)
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            try {
+                Intent main = new Intent(Intent.ACTION_MAIN);
+                main.addCategory(Intent.CATEGORY_LAUNCHER);
+                final java.util.List<android.content.pm.ResolveInfo> ris = getPackageManager().queryIntentActivities(main, 0);
+                java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
+                for (android.content.pm.ResolveInfo ri : ris) {
+                    String pkg = ri.activityInfo.packageName;
+                    if (pkg == null) continue;
+                    if (pkg.equals(getPackageName()) || pkg.startsWith("io.github.gjr787878")) continue;
+                    CharSequence l = ri.loadLabel(getPackageManager());
+                    names.put(pkg, l != null && l.length() > 0 ? l.toString() : pkg);
+                }
+                final java.util.List<String> pkgs = new java.util.ArrayList<>(names.keySet());
+                final String[] items = new String[pkgs.size()];
+                java.util.Set<String> already = Config.getTargetPackages(this);
+                for (int i = 0; i < pkgs.size(); i++) {
+                    items[i] = names.get(pkgs.get(i)) + "\n" + pkgs.get(i)
+                            + (already.contains(pkgs.get(i)) ? "  ✓" : "");
+                }
+                runOnUiThread(() -> {
+                    loading.dismiss();
+                    new AlertDialog.Builder(this)
+                            .setTitle(t("选择目标应用", "Select Target App", "Выберите приложение"))
+                            .setItems(items, (d, which) -> {
+                                String pkg = pkgs.get(which);
+                                getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
+                                Config.addTargetPackage(this, pkg);
+                                String json = readIdentityFile(pkg);
+                                if (json == null || !json.startsWith("{")) {
+                                    Identity nid = IdentityGenerator.generateRandom();
+                                    IdentityGenerator.fillMissing(nid);
+                                    json = nid.toJson();
+                                    writeIdentityFile(pkg, json);
+                                    writeExternalIdentityFile(pkg, json);
+                                }
+                                Toast.makeText(this,
+                                        t("已添加目标应用", "Target app added", "Приложение добавлено"),
+                                        Toast.LENGTH_SHORT).show();
+                                refreshAppList();
+                            })
+                            .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
+                            .show();
+                });
+            } catch (Throwable e) {
+                runOnUiThread(() -> {
+                    loading.dismiss();
+                    Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                });
+            }
+        }).start();
+    }
+
+    // ===== 自动清空目标应用数据（Root）=====
+
+    /** 设置页开关：保存/随机后是否自动清空目标应用数据并重启 */
+    private boolean isAutoClearAfterSave() {
+        return getSharedPreferences("devicereset_ui", MODE_PRIVATE)
+                .getBoolean("auto_clear_after_save", true);
+    }
+
+    /** 写外部存储哨兵备份（/sdcard/Android/data/<pkg>/files/.identity_sentinel），模块可读 */
+    private void writeExternalIdentityFile(String packageName, String json) {
+        try {
+            String dir = "/sdcard/Android/data/" + packageName + "/files";
+            String path = dir + "/.identity_sentinel";
+            Process su = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            os.writeBytes("mkdir -p '" + dir + "'\n");
+            os.writeBytes("echo '" + json.replace("'", "'\\''") + "' > '" + path + "'\n");
+            os.writeBytes("chmod 666 '" + path + "'\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            su.waitFor();
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 清空目标应用数据（缓存/数据库/偏好等，保留 .identity_sentinel / .identity_runtime），
+     * 然后强停并重启应用。效果等价于手动「设置→存储→清除数据」，
+     * 但身份哨兵保留，模块下次启动会按哨兵应用当前身份，立即生效。
+     */
+    private boolean clearTargetAppData(String pkg, String identityJson) {
+        try {
+            // 1. 确保哨兵存在（内部 + 外部），清数据后依然按当前身份生效
+            writeIdentityFile(pkg, identityJson);
+            writeExternalIdentityFile(pkg, identityJson);
+            // 2. 强停应用
+            String dataDir = "/data/user/0/" + pkg;
+            Process su = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            os.writeBytes("am force-stop " + pkg + " 2>/dev/null\n");
+            // 3. 清缓存/数据库/偏好/网页缓存（保留 files/ 下的身份文件）
+            os.writeBytes("rm -rf " + dataDir + "/cache " + dataDir + "/code_cache "
+                    + dataDir + "/databases " + dataDir + "/shared_prefs "
+                    + dataDir + "/no_backup " + dataDir + "/app_webview 2>/dev/null\n");
+            os.writeBytes("for f in " + dataDir + "/files/*; do b=$(basename \"$f\"); "
+                    + "[ \"$b\" = \".identity_sentinel\" ] || [ \"$b\" = \".identity_runtime\" ] || rm -rf \"$f\"; done 2>/dev/null\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            su.waitFor();
+            // 4. 重启目标应用，模块加载哨兵身份，立即生效
+            relaunchApp(pkg);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 用 monkey 拉起目标应用默认入口 */
+    private void relaunchApp(String pkg) {
+        try {
+            Process su = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            os.writeBytes("monkey -p " + pkg + " 1 2>/dev/null\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            su.waitFor();
+        } catch (Throwable ignored) {}
+    }
+
+    /** 手动清空某应用数据并重启（输入包名） */
+    private void showClearDataDialog() {
+        final EditText input = new EditText(this);
+        input.setHint(t("输入应用包名，如 com.example.app", "Enter package name, e.g. com.example.app", "Введите имя пакета, например com.example.app"));
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(48, 24, 48, 24);
+        layout.addView(input);
+        new AlertDialog.Builder(this)
+                .setTitle(t("清空目标应用数据并重启", "Clear Target App Data & Restart", "Очистить данные приложения и перезапустить"))
+                .setMessage(t("将清空目标应用的缓存、数据库、偏好设置（保留身份哨兵），并强制停止后重启，使当前身份立即生效。",
+                        "Clears the target app's cache, databases and prefs (identity sentinel is kept), force-stops and restarts it so the current identity takes effect immediately.",
+                        "Очищает кэш, базы данных и настройки целевого приложения (сторожевой файл сохраняется), принудительно останавливает и перезапускает его."))
+                .setView(layout)
+                .setPositiveButton(t("清空", "Clear", "Очистить"), (d, w) -> {
+                    String pkg = input.getText().toString().trim();
+                    if (pkg.isEmpty()) {
+                        Toast.makeText(this, t("请输入包名", "Please enter package name", "Введите имя пакета"), Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    new Thread(() -> {
+                        String json = readIdentityFile(pkg);
+                        if (json == null || !json.startsWith("{")) {
+                            Identity nid = IdentityGenerator.generateRandom();
+                            IdentityGenerator.fillMissing(nid);
+                            json = nid.toJson();
+                        }
+                        final String fjson = json;
+                        final boolean ok = clearTargetAppData(pkg, fjson);
+                        runOnUiThread(() -> Toast.makeText(this, ok
+                                ? t("已清空并重启: ", "Cleared & restarted: ", "Очищено и перезапущено: ") + pkg
+                                : t("清空失败，请确认已授予ROOT权限", "Clear failed, ensure ROOT access", "Ошибка, проверьте Root-права"),
+                                Toast.LENGTH_LONG).show());
+                    }).start();
+                })
+                .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
+                .show();
     }
 
     // ===== 设置页 =====
@@ -650,11 +867,42 @@ public class MainActivity extends AppCompatActivity {
         }
         loadHookStates();
 
+        // 生效方式
+        addSettingsSection(ll, t("生效方式", "Apply Mode", "Режим"), d);
+        LinearLayout autoRow = new LinearLayout(this);
+        autoRow.setOrientation(LinearLayout.HORIZONTAL);
+        autoRow.setGravity(Gravity.CENTER_VERTICAL);
+        autoRow.setPadding(Math.round(16 * d), Math.round(12 * d), Math.round(16 * d), Math.round(12 * d));
+        final GlassButtonDrawable autoGlass = new GlassButtonDrawable(24 * d, 1 * d, false);
+        autoRow.setBackground(autoGlass);
+        final TextView autoTv = new TextView(this);
+        autoTv.setText(t("保存/随机后自动清空目标应用数据并重启",
+                "Auto-clear target app data & restart after save/random",
+                "Автоочистка данных приложения и перезапуск после сохранения/рандома"));
+        autoTv.setTextSize(15);
+        autoTv.setTextColor(COLOR_WHITE);
+        autoRow.addView(autoTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final boolean[] autoOn = {isAutoClearAfterSave()};
+        autoTv.setTextColor(autoOn[0] ? COLOR_BLUE : COLOR_WHITE);
+        autoGlass.setGlassSelected(autoOn[0]);
+        autoRow.setOnClickListener(v -> {
+            autoOn[0] = !autoOn[0];
+            getSharedPreferences("devicereset_ui", MODE_PRIVATE)
+                    .edit().putBoolean("auto_clear_after_save", autoOn[0]).apply();
+            autoTv.setTextColor(autoOn[0] ? COLOR_BLUE : COLOR_WHITE);
+            autoGlass.setGlassSelected(autoOn[0]);
+        });
+        ll.addView(autoRow, makeFormLp(d));
+
         // 维护
         addSettingsSection(ll, t("维护", "Maintenance", "Обслуживание"), d);
         Button btnReset = makeGlassBtn(t("手动重置身份", "Reset Identity (by package)", "Сбросить идентичность"), 15);
         ll.addView(btnReset, makeFormLp(d));
         btnReset.setOnClickListener(v -> showResetDialog());
+
+        Button btnClearData = makeGlassBtn(t("清空目标应用数据并重启", "Clear Target App Data & Restart", "Очистить данные приложения и перезапустить"), 15);
+        ll.addView(btnClearData, makeFormLp(d));
+        btnClearData.setOnClickListener(v -> showClearDataDialog());
 
         Button btnAbout = makeGlassBtn(t("关于", "About", "О программе"), 15);
         ll.addView(btnAbout, makeFormLp(d));
@@ -669,19 +917,22 @@ public class MainActivity extends AppCompatActivity {
         addInfoBlock(ll, t("使用方法", "How to use", "Как использовать"),
                 t("1. LSPosed管理器 → 模块 → 启用本模块 → 作用域勾选目标应用\n" +
                   "2. 重启手机（必须重启）\n" +
-                  "3. 系统设置 → 应用 → 目标应用 → 存储 → 清除数据\n" +
-                  "4. 重新打开应用，即获得全新设备身份\n" +
-                  "5. 在「应用」页查看和自定义每个应用的身份",
+                  "3. 在「应用」页点击「＋ 选择应用」可直接添加任意已安装应用为目标\n" +
+                  "4. 打开目标应用详情 → 自定义/随机 → 保存\n" +
+                  "5. 在「设置」页开启「自动清空目标应用数据」后，保存/随机即自动清空数据并重启，立即生效\n" +
+                  "6. 也可在「维护」中手动「清空目标应用数据并重启」",
                   "1. LSPosed Manager -> Modules -> Enable this module -> Check target apps in Scope\n" +
                   "2. Reboot phone (required)\n" +
-                  "3. System Settings -> Apps -> Target app -> Storage -> Clear data\n" +
-                  "4. Reopen the app to get a brand new device identity\n" +
-                  "5. Use the Apps tab to view and customize per-app identities",
+                  "3. Use \"+ Select App (All Apps)\" on the Apps tab to add any installed app as target\n" +
+                  "4. Open target app -> Customize/Random -> Save\n" +
+                  "5. With \"Auto-clear target app data\" enabled in Settings, save/random auto-clears data and restarts instantly\n" +
+                  "6. You can also use \"Clear Target App Data & Restart\" in Maintenance",
                   "1. LSPosed Manager -> Модули -> Включить модуль -> Отметить целевые приложения\n" +
                   "2. Перезагрузите телефон (обязательно)\n" +
-                  "3. Настройки -> Приложения -> Целевое приложение -> Память -> Очистить данные\n" +
-                  "4. Переоткройте приложение для получения новой идентичности\n" +
-                  "5. Используйте вкладку «Приложения» для просмотра и настройки"), d);
+                  "3. Во вкладке «Приложения» используйте «+ Выбрать приложение (все)»\n" +
+                  "4. Откройте приложение -> Настроить/Случайно -> Сохранить\n" +
+                  "5. С включённой «Автоочисткой данных» сохранение/рандом сразу очищает данные и перезапускает приложение\n" +
+                  "6. Также можно вручную «Очистить данные приложения и перезапустить» в разделе «Обслуживание»"), d);
 
         addInfoBlock(ll, t("工作原理", "How It Works", "Как это работает"),
                 t("模块在目标应用私有目录放置隐藏哨兵文件。清除应用数据会删除整个私有目录，哨兵文件也被删除。下次应用启动时检测到哨兵不存在，即生成全新设备身份并写入新哨兵。",
@@ -862,7 +1113,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.0.0 (versionCode 44)\n");
+                devInfo.append("Module Version: 3.1.0 (versionCode 45)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1058,9 +1309,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.0.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
-                        "Version: 3.0.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to all apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
-                        "Версия: 3.0.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется ко всем приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.1.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
+                        "Version: 3.1.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
+                        "Версия: 3.1.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется к приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }

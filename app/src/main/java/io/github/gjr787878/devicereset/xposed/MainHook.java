@@ -47,7 +47,13 @@ public class MainHook implements IXposedHookLoadPackage {
             try { xPrefs.reload(); } catch (Throwable ignored) {}
         }
 
-        // 直接对所有LSPosed作用域中的应用生效
+        // 目标应用过滤：若用户在模块内通过「＋ 选择应用」指定了目标包名，
+        // 则只对目标应用生效；未指定时（集合为空）保持原有行为，对所有作用域应用生效。
+        java.util.Set<String> targets = getPrefStringSet("target_packages");
+        if (targets != null && !targets.isEmpty() && !targets.contains(lpparam.packageName)) {
+            XposedBridge.log("[DeviceReset] skip non-target app: " + lpparam.packageName);
+            return;
+        }
         XposedBridge.log("[DeviceReset] handleLoadPackage for: " + lpparam.packageName);
 
         // 读取各Hook开关
@@ -155,6 +161,16 @@ public class MainHook implements IXposedHookLoadPackage {
             return xPrefs.getBoolean(key, defaultValue);
         } catch (Throwable t) {
             return defaultValue;
+        }
+    }
+
+    private java.util.Set<String> getPrefStringSet(String key) {
+        if (!prefsAvailable || xPrefs == null) return null;
+        try {
+            java.util.Set<String> s = xPrefs.getStringSet(key, null);
+            return s != null ? new java.util.HashSet<>(s) : null;
+        } catch (Throwable t) {
+            return null;
         }
     }
 }
