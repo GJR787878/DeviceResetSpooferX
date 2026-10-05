@@ -1730,7 +1730,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.8.3 (versionCode 59)\n");
+                devInfo.append("Module Version: 3.8.4 (versionCode 60)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1790,6 +1790,8 @@ public class MainActivity extends AppCompatActivity {
                     os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.identity_runtime\"; if [ -f \"$f\" ]; then echo \"RUNTIME: $pkg\"; fi; done\n");
                     os.writeBytes("echo '--- HOOK LOGS (真授权证据) ---'\n");
                     os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.drs_hook.log\"; if [ -f \"$f\" ]; then echo \"HOOKED: $pkg\"; cat \"$f\"; fi; done\n");
+                    os.writeBytes("echo '--- PROBE LOGS (全局注入覆盖证据) ---'\n");
+                    os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.drs_probe.log\"; if [ -f \"$f\" ]; then echo \"PROBED: $pkg\"; tail -1 \"$f\"; fi; done\n");
                     os.writeBytes("echo '--- targets.txt 权限链 ---'\n");
                     os.writeBytes("ls -ld /data/data/io.github.gjr787878.devicereset 2>&1\n");
                     os.writeBytes("ls -la /data/data/io.github.gjr787878.devicereset/files/ 2>&1\n");
@@ -1890,15 +1892,16 @@ public class MainActivity extends AppCompatActivity {
                     writeFile(new java.io.File(tmpDir, "lsp_sync.log"), sl.toString());
                 }
 
-                // 6. 打包成 zip
-                java.io.File zipFile = new java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                        android.os.Environment.DIRECTORY_DOWNLOADS), "log.zip");
-                zipDirectory(tmpDir, zipFile);
+                // 6. 打包成 zip —— Android 11+ 分区存储不能直接写公共 Downloads，
+                // 改用 MediaStore 写入下载目录（必定成功），toast 提示文件名
+                java.io.File zipSrc = java.io.File.createTempFile("drs_log_", ".zip", getCacheDir());
+                zipDirectory(tmpDir, zipSrc);
+                final String zipPath = exportToDownloads(zipSrc);
+                if (zipPath == null) throw new Exception("MediaStore write failed");
 
                 // 清理临时目录
                 deleteRecursive(tmpDir);
 
-                final String zipPath = zipFile.getAbsolutePath();
                 runOnUiThread(() -> Toast.makeText(this,
                         t("日志已导出: ", "Log exported: ", "Журнал экспортирован: ") + zipPath,
                         Toast.LENGTH_LONG).show());
@@ -1909,6 +1912,32 @@ public class MainActivity extends AppCompatActivity {
                         Toast.LENGTH_LONG).show());
             }
         }).start();
+    }
+
+    /** 通过 MediaStore 把文件写入系统「下载」目录（Android 11+ 唯一可靠方式），返回可读路径 */
+    private String exportToDownloads(java.io.File src) {
+        try {
+            android.content.ContentValues v = new android.content.ContentValues();
+            v.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "log.zip");
+            v.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/zip");
+            v.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_DOWNLOADS);
+            android.net.Uri u = getContentResolver().insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (u == null) return null;
+            java.io.OutputStream os = getContentResolver().openOutputStream(u);
+            if (os == null) return null;
+            java.io.FileInputStream fis = new java.io.FileInputStream(src);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = fis.read(buf)) > 0) os.write(buf, 0, n);
+            fis.close();
+            os.close();
+            return t("已保存到下载目录: ", "Saved to Downloads: ", "Сохранено в загрузки: ")
+                    + "Download/log.zip (" + android.provider.MediaStore.MediaColumns.RELATIVE_PATH + ")";
+        } catch (Throwable e) {
+            return null;
+        }
     }
 
     private void writeFile(java.io.File f, String content) {

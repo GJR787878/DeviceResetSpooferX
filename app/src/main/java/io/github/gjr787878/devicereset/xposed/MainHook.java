@@ -35,6 +35,9 @@ public class MainHook implements IXposedHookLoadPackage {
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
         if (MODULE_PACKAGE.equals(lpparam.packageName)) return;
 
+        // 注入探测：本进程被 LSPosed 注入即写 probe 日志（证明全局注入是否覆盖所有进程）
+        writeProbeLog(lpparam.packageName);
+
         // 目标应用过滤（全局注入模式）：模块在 LSPosed 勾「系统框架」后注入所有进程，
         // 这里按 targets.txt 判断：无目标→不注入任何进程；非目标→跳过，零开销。
         java.util.Set<String> targets = readTargetsFile();
@@ -153,6 +156,21 @@ public class MainHook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log("[DeviceReset] FATAL error: " + t.getMessage());
             XposedBridge.log(t);
+        }
+    }
+
+    /** 注入探测：任何进程被 LSPosed 注入都写一行（证明全局注入覆盖所有进程）。
+     * 写在进程自身外部目录，导出日志扫描 .drs_probe.log 即可确认。 */
+    private void writeProbeLog(String pkg) {
+        try {
+            java.io.File ext = new java.io.File(android.os.Environment.getExternalStorageDirectory(),
+                    "Android/data/" + pkg + "/files");
+            ext.mkdirs();
+            java.io.File f = new java.io.File(ext, ".drs_probe.log");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+            fos.write(("probe ts=" + System.currentTimeMillis() + " pkg=" + pkg + " injected\n").getBytes("UTF-8"));
+            fos.close();
+        } catch (Throwable ignored) {
         }
     }
 
