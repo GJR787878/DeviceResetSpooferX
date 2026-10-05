@@ -660,6 +660,10 @@ public class MainActivity extends AppCompatActivity {
         ll.addView(btnAbout, makeFormLp(d));
         btnAbout.setOnClickListener(v -> showAboutDialog());
 
+        Button btnExportLog = makeGlassBtn(t("导出诊断日志", "Export Diagnostic Log", "Экспорт диагностического журнала"), 15);
+        ll.addView(btnExportLog, makeFormLp(d));
+        btnExportLog.setOnClickListener(v -> exportDiagnosticLog());
+
         // 说明文字（原首页内容）
         addSettingsSection(ll, t("使用方法", "Usage", "Использование"), d);
         addInfoBlock(ll, t("使用方法", "How to use", "Как использовать"),
@@ -775,11 +779,13 @@ public class MainActivity extends AppCompatActivity {
 
     // ===== Root 工具 =====
     private java.util.List<String> scanPackagesWithIdentity() {
-        java.util.List<String> result = new java.util.ArrayList<>();
+        java.util.Set<String> result = new java.util.LinkedHashSet<>();
         try {
             Process su = Runtime.getRuntime().exec("su");
             java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            // 同时扫描内部 /data/data 和外部 /sdcard/Android/data
             os.writeBytes("for d in /data/data/*/; do pkg=$(basename \"$d\"); if [ -f \"$d/files/.identity_sentinel\" ]; then echo \"$pkg\"; fi; done\n");
+            os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); if [ -f \"$d/files/.identity_sentinel\" ]; then echo \"$pkg\"; fi; done\n");
             os.writeBytes("exit\n");
             os.flush();
             java.io.BufferedReader reader = new java.io.BufferedReader(
@@ -787,33 +793,39 @@ public class MainActivity extends AppCompatActivity {
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
-                if (!line.isEmpty()) result.add(line);
+                if (!line.isEmpty() && !line.equals("*")) result.add(line);
             }
             reader.close();
             su.waitFor();
         } catch (Throwable ignored) {}
-        return result;
+        return new java.util.ArrayList<>(result);
     }
 
     private String readIdentityFile(String packageName) {
-        try {
-            String path = "/data/data/" + packageName + "/files/.identity_sentinel";
-            Process su = Runtime.getRuntime().exec("su");
-            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
-            os.writeBytes("cat '" + path + "'\n");
-            os.writeBytes("exit\n");
-            os.flush();
-            java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(su.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
-            reader.close();
-            int rc = su.waitFor();
-            String output = sb.toString().trim();
-            if (rc == 0 && !output.isEmpty() && output.startsWith("{")) return output;
-            return null;
-        } catch (Throwable t) { return null; }
+        // 先尝试内部路径，再尝试外部路径
+        String[] paths = {
+            "/data/data/" + packageName + "/files/.identity_sentinel",
+            "/sdcard/Android/data/" + packageName + "/files/.identity_sentinel"
+        };
+        for (String path : paths) {
+            try {
+                Process su = Runtime.getRuntime().exec("su");
+                java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+                os.writeBytes("cat '" + path + "' 2>/dev/null\n");
+                os.writeBytes("exit\n");
+                os.flush();
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(su.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+                int rc = su.waitFor();
+                String output = sb.toString().trim();
+                if (rc == 0 && !output.isEmpty() && output.startsWith("{")) return output;
+            } catch (Throwable ignored) {}
+        }
+        return null;
     }
 
     private void writeIdentityFile(String packageName, String json) {
@@ -827,6 +839,192 @@ public class MainActivity extends AppCompatActivity {
             os.flush();
             su.waitFor();
         } catch (Throwable ignored) {}
+    }
+
+    // ===== 导出诊断日志 =====
+    private void exportDiagnosticLog() {
+        Toast.makeText(this, t("正在收集诊断信息...", "Collecting diagnostic info...", "Сбор диагностической информации..."), Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                java.io.File tmpDir = new java.io.File(getCacheDir(), "drs_log_" + System.currentTimeMillis());
+                tmpDir.mkdirs();
+
+                // 1. 设备信息
+                StringBuilder devInfo = new StringBuilder();
+                devInfo.append("=== Device Info ===\n");
+                devInfo.append("Brand: ").append(android.os.Build.BRAND).append("\n");
+                devInfo.append("Model: ").append(android.os.Build.MODEL).append("\n");
+                devInfo.append("Manufacturer: ").append(android.os.Build.MANUFACTURER).append("\n");
+                devInfo.append("Device: ").append(android.os.Build.DEVICE).append("\n");
+                devInfo.append("Product: ").append(android.os.Build.PRODUCT).append("\n");
+                devInfo.append("Hardware: ").append(android.os.Build.HARDWARE).append("\n");
+                devInfo.append("Fingerprint: ").append(android.os.Build.FINGERPRINT).append("\n");
+                devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
+                devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
+                devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
+                devInfo.append("Module Version: 3.0.0 (versionCode 44)\n");
+                devInfo.append("Language: ").append(currentLang).append("\n");
+                // Root 状态
+                devInfo.append("\n=== Root Status ===\n");
+                try {
+                    Process su = Runtime.getRuntime().exec("su");
+                    java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+                    os.writeBytes("id\n");
+                    os.writeBytes("exit\n");
+                    os.flush();
+                    java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(su.getInputStream()));
+                    String l;
+                    while ((l = r.readLine()) != null) devInfo.append("su output: ").append(l).append("\n");
+                    r.close();
+                    su.waitFor();
+                    devInfo.append("Root: GRANTED\n");
+                } catch (Throwable e) {
+                    devInfo.append("Root: FAILED - ").append(e.getMessage()).append("\n");
+                }
+                writeFile(new java.io.File(tmpDir, "device_info.txt"), devInfo.toString());
+
+                // 2. 模块配置
+                StringBuilder cfg = new StringBuilder();
+                cfg.append("=== Module Config ===\n");
+                cfg.append("hook_android_id: ").append(Config.isHookAndroidId(this)).append("\n");
+                cfg.append("hook_ad_id: ").append(Config.isHookAdId(this)).append("\n");
+                cfg.append("hook_imei: ").append(Config.isHookImei(this)).append("\n");
+                cfg.append("hook_build_info: ").append(Config.isHookBuild(this)).append("\n");
+                cfg.append("hook_mac: ").append(Config.isHookMac(this)).append("\n");
+                cfg.append("hook_gsf_id: ").append(Config.isHookGsf(this)).append("\n");
+                cfg.append("hook_carrier: ").append(Config.isHookCarrier(this)).append("\n");
+                cfg.append("auto_reset: ").append(Config.isAutoReset(this)).append("\n");
+                cfg.append("\n=== Target Packages (from prefs) ===\n");
+                for (String p : Config.getTargetPackages(this)) cfg.append(p).append("\n");
+                writeFile(new java.io.File(tmpDir, "module_config.txt"), cfg.toString());
+
+                // 3. 扫描所有应用的哨兵文件状态
+                StringBuilder scan = new StringBuilder();
+                scan.append("=== Sentinel File Scan ===\n");
+                scan.append("Scanning /data/data/*/files/.identity_sentinel and /sdcard/Android/data/*/files/.identity_sentinel\n\n");
+                try {
+                    Process su = Runtime.getRuntime().exec("su");
+                    java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+                    os.writeBytes("echo '--- INTERNAL (/data/data) ---'\n");
+                    os.writeBytes("for d in /data/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.identity_sentinel\"; if [ -f \"$f\" ]; then echo \"FOUND: $pkg ($(wc -c < \"$f\") bytes)\"; fi; done\n");
+                    os.writeBytes("echo '--- EXTERNAL (/sdcard/Android/data) ---'\n");
+                    os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.identity_sentinel\"; if [ -f \"$f\" ]; then echo \"FOUND: $pkg ($(wc -c < \"$f\") bytes)\"; fi; done\n");
+                    os.writeBytes("echo '--- RUNTIME FILES ---'\n");
+                    os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.identity_runtime\"; if [ -f \"$f\" ]; then echo \"RUNTIME: $pkg\"; fi; done\n");
+                    os.writeBytes("exit\n");
+                    os.flush();
+                    java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(su.getInputStream()));
+                    String l;
+                    while ((l = r.readLine()) != null) scan.append(l).append("\n");
+                    r.close();
+                    su.waitFor();
+                } catch (Throwable e) {
+                    scan.append("Scan error: ").append(e.getMessage()).append("\n");
+                }
+                writeFile(new java.io.File(tmpDir, "scan_result.txt"), scan.toString());
+
+                // 4. 导出所有有哨兵文件的应用的身份
+                java.io.File idDir = new java.io.File(tmpDir, "identities");
+                idDir.mkdirs();
+                java.util.List<String> pkgs = scanPackagesWithIdentity();
+                for (String pkg : pkgs) {
+                    String json = readIdentityFile(pkg);
+                    if (json != null) {
+                        writeFile(new java.io.File(idDir, pkg + ".json"), json);
+                    }
+                }
+
+                // 5. LSPosed 模块状态（尝试读取）
+                StringBuilder lsp = new StringBuilder();
+                lsp.append("=== LSPosed Status ===\n");
+                lsp.append("Module package: io.github.gjr787878.devicereset\n");
+                lsp.append("Note: If no apps found with sentinel files, the module may not be enabled in LSPosed Manager.\n");
+                lsp.append("Please check: LSPosed Manager -> Modules -> DeviceResetSpooferX -> Enabled -> Scope -> select target apps -> Reboot\n");
+                try {
+                    Process su = Runtime.getRuntime().exec("su");
+                    java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+                    os.writeBytes("ls -la /data/adb/lspd/ 2>/dev/null\n");
+                    os.writeBytes("cat /data/adb/lspd/config/modules_config.json 2>/dev/null | head -100\n");
+                    os.writeBytes("exit\n");
+                    os.flush();
+                    java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(su.getInputStream()));
+                    String l;
+                    while ((l = r.readLine()) != null) lsp.append(l).append("\n");
+                    r.close();
+                    su.waitFor();
+                } catch (Throwable e) {
+                    lsp.append("LSPosed config read error: ").append(e.getMessage()).append("\n");
+                }
+                writeFile(new java.io.File(tmpDir, "lsposed_status.txt"), lsp.toString());
+
+                // 6. 打包成 zip
+                java.io.File zipFile = new java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOAD), "log.zip");
+                zipDirectory(tmpDir, zipFile);
+
+                // 清理临时目录
+                deleteRecursive(tmpDir);
+
+                final String zipPath = zipFile.getAbsolutePath();
+                runOnUiThread(() -> Toast.makeText(this,
+                        t("日志已导出: ", "Log exported: ", "Журнал экспортирован: ") + zipPath,
+                        Toast.LENGTH_LONG).show());
+            } catch (Throwable e) {
+                final String err = e.getMessage();
+                runOnUiThread(() -> Toast.makeText(this,
+                        t("导出失败: ", "Export failed: ", "Ошибка экспорта: ") + err,
+                        Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    private void writeFile(java.io.File f, String content) {
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(f);
+            w.write(content);
+            w.close();
+        } catch (Throwable ignored) {}
+    }
+
+    private void zipDirectory(java.io.File srcDir, java.io.File zipFile) throws Exception {
+        java.io.FileOutputStream fos = new java.io.FileOutputStream(zipFile);
+        java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(fos);
+        java.io.File[] files = srcDir.listFiles();
+        if (files != null) {
+            for (java.io.File f : files) {
+                if (f.isDirectory()) {
+                    java.io.File[] subFiles = f.listFiles();
+                    if (subFiles != null) {
+                        for (java.io.File sf : subFiles) {
+                            addToZip(zos, sf, f.getName() + "/");
+                        }
+                    }
+                } else {
+                    addToZip(zos, f, "");
+                }
+            }
+        }
+        zos.close();
+        fos.close();
+    }
+
+    private void addToZip(java.util.zip.ZipOutputStream zos, java.io.File file, String prefix) throws Exception {
+        java.io.FileInputStream fis = new java.io.FileInputStream(file);
+        java.util.zip.ZipEntry entry = new java.util.zip.ZipEntry(prefix + file.getName());
+        zos.putNextEntry(entry);
+        byte[] buffer = new byte[4096];
+        int len;
+        while ((len = fis.read(buffer)) > 0) zos.write(buffer, 0, len);
+        fis.close();
+        zos.closeEntry();
+    }
+
+    private void deleteRecursive(java.io.File f) {
+        if (f.isDirectory()) {
+            java.io.File[] children = f.listFiles();
+            if (children != null) for (java.io.File c : children) deleteRecursive(c);
+        }
+        f.delete();
     }
 
     // ===== 对话框 =====
