@@ -27,12 +27,29 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final String PREFS_NAME = "devicereset_config";
     private static XSharedPreferences xPrefs;
     private static boolean prefsAvailable = false;
+    /** 目标列表缓存：从模块 files/targets.txt 读取（chmod 666），不依赖 XSharedPreferences */
+    private static volatile java.util.Set<String> cachedTargets = null;
+    private static long lastTargetsRead = 0L;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
         if (MODULE_PACKAGE.equals(lpparam.packageName)) return;
 
-        // 读取模块配置
+        // 目标应用过滤（全局注入模式）：模块在 LSPosed 勾「系统框架」后注入所有进程，
+        // 这里按 targets.txt 判断：无目标→不注入任何进程；非目标→跳过，零开销。
+        java.util.Set<String> targets = readTargetsFile();
+        if (targets == null || targets.isEmpty()) {
+            XposedBridge.log("[DeviceReset] no targets configured, skip: " + lpparam.packageName);
+            return;
+        }
+        if (!targets.contains(lpparam.packageName)) {
+            XposedBridge.log("[DeviceReset] skip non-target app: " + lpparam.packageName);
+            return;
+        }
+        XposedBridge.log("[DeviceReset] handleLoadPackage for: " + lpparam.packageName
+                + " (targets=" + targets.size() + ")");
+
+        // 读取模块配置（XSharedPreferences 兜底：开关与身份）
         if (xPrefs == null) {
             try {
                 xPrefs = new XSharedPreferences(MODULE_PACKAGE, PREFS_NAME);
@@ -46,15 +63,6 @@ public class MainHook implements IXposedHookLoadPackage {
         if (prefsAvailable) {
             try { xPrefs.reload(); } catch (Throwable ignored) {}
         }
-
-        // 目标应用过滤：若用户在模块内通过「＋ 选择应用」指定了目标包名，
-        // 则只对目标应用生效；未指定时（集合为空）保持原有行为，对所有作用域应用生效。
-        java.util.Set<String> targets = getPrefStringSet("target_packages");
-        if (targets != null && !targets.isEmpty() && !targets.contains(lpparam.packageName)) {
-            XposedBridge.log("[DeviceReset] skip non-target app: " + lpparam.packageName);
-            return;
-        }
-        XposedBridge.log("[DeviceReset] handleLoadPackage for: " + lpparam.packageName);
 
         // 读取各Hook开关
         final boolean hookAndroidId = getPrefBoolean("hook_android_id", true);
@@ -82,29 +90,32 @@ public class MainHook implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {}
             XposedBridge.log("[DeviceReset] externalFilesDir: " + externalFilesDir);
 
-            // 身份读取优先级：模块配置（手动触发写入）→ 旧哨兵文件（兼容旧版）→ 无身份则不伪装
+            // 身份读取优先级：哨兵文件（手动触发写入，chmod 666，最可靠）→ 模块配置（XSharedPreferences 兜底）
             Identity identity = null;
-            String idJson = getPrefString("identity_" + lpparam.packageName);
-            if (idJson != null && idJson.startsWith("{")) {
-                try {
-                    identity = Identity.fromJson(idJson);
-                    if (identity != null) {
-                        XposedBridge.log("[DeviceReset] Identity loaded from module config: androidId=" + identity.androidId
-                                + ", model=" + identity.model + ", brand=" + identity.brand);
+            try {
+                identity = SentinelDetector.checkAndGetIdentityByDirs(filesDir, externalFilesDir);
+            } catch (Throwable ignored) {}
+            if (identity != null) {
+                XposedBridge.log("[DeviceReset] Identity loaded from sentinel: androidId=" + identity.androidId
+                        + ", model=" + identity.model + ", brand=" + identity.brand);
+            } else {
+                String idJson = getPrefString("identity_" + lpparam.packageName);
+                if (idJson != null && idJson.startsWith("{")) {
+                    try {
+                        identity = Identity.fromJson(idJson);
+                        if (identity != null) {
+                            XposedBridge.log("[DeviceReset] Identity loaded from module config: androidId=" + identity.androidId
+                                    + ", model=" + identity.model + ", brand=" + identity.brand);
+                        }
+                    } catch (Throwable parseErr) {
+                        XposedBridge.log("[DeviceReset] parse module-config identity failed: " + parseErr.getMessage());
                     }
-                } catch (Throwable parseErr) {
-                    XposedBridge.log("[DeviceReset] parse module-config identity failed: " + parseErr.getMessage());
                 }
             }
             if (identity == null) {
-                identity = SentinelDetector.checkAndGetIdentityByDirs(filesDir, externalFilesDir);
-                if (identity == null) {
-                    XposedBridge.log("[DeviceReset] no identity for " + lpparam.packageName
-                            + ", skip hooks (identity must be manually triggered in module UI)");
-                    return;
-                }
-                XposedBridge.log("[DeviceReset] Identity loaded from sentinel: androidId=" + identity.androidId
-                        + ", model=" + identity.model + ", brand=" + identity.brand);
+                XposedBridge.log("[DeviceReset] no identity for " + lpparam.packageName
+                        + ", skip hooks (identity must be manually triggered in module UI)");
+                return;
             }
 
             // 安装所有Hook
@@ -200,5 +211,31 @@ public class MainHook implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /**
+     * 读取目标列表：模块 files/targets.txt（每行一个包名，chmod 644）。
+     * 带 2 秒缓存，避免每个 app 启动都读盘。
+     */
+    private java.util.Set<String> readTargetsFile() {
+        long now = System.currentTimeMillis();
+        if (cachedTargets != null && now - lastTargetsRead < 2000L) return cachedTargets;
+        java.util.Set<String> result = null;
+        try {
+            java.io.File f = new java.io.File("/data/data/" + MODULE_PACKAGE + "/files/targets.txt");
+            if (f.exists()) {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(f.toPath());
+                result = new java.util.HashSet<>();
+                for (String l : lines) {
+                    l = l.trim();
+                    if (!l.isEmpty()) result.add(l);
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[DeviceReset] readTargetsFile failed: " + t.getMessage());
+        }
+        cachedTargets = result;
+        lastTargetsRead = now;
+        return result;
     }
 }

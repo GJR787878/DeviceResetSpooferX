@@ -43,6 +43,7 @@ public class Config {
 
     public static void setTargetPackages(Context context, Set<String> packages) {
         getPrefs(context).edit().putStringSet(KEY_TARGET_PACKAGES, packages).apply();
+        updateTargetsFile(context, packages);
     }
 
     public static void addTargetPackage(Context context, String packageName) {
@@ -59,6 +60,24 @@ public class Config {
 
     public static boolean isTargetPackage(Context context, String packageName) {
         return getTargetPackages(context).contains(packageName);
+    }
+
+    /**
+     * 把目标列表同步到模块私有 files/targets.txt（chmod 666，任何进程可读）。
+     * 用途：LSPosed 勾选「系统框架」后模块注入所有进程，MainHook 读此文件
+     * 判断目标，实现「应用内选目标即生效」，完全不依赖 LSPosed 作用域同步。
+     */
+    private static void updateTargetsFile(Context context, Set<String> packages) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (String p : packages) sb.append(p).append('\n');
+            java.io.File f = new java.io.File(context.getFilesDir(), "targets.txt");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+            fos.write(sb.toString().getBytes("UTF-8"));
+            fos.close();
+            f.setReadable(true, false); // chmod 644，hook 进程可读
+        } catch (Throwable ignored) {
+        }
     }
 
     // ===== 身份主存储（模块配置，手动触发写入，UI 无需 Root） =====

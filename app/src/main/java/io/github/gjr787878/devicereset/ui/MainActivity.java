@@ -1391,6 +1391,19 @@ public class MainActivity extends AppCompatActivity {
         lspLp.bottomMargin = Math.round(10 * d);
         ll.addView(lspStatusTv, lspLp);
 
+        // 作用域模式说明：一次配置后应用内全托管
+        TextView scopeTip = new TextView(this);
+        scopeTip.setText(t("建议：在 LSPosed 管理器为本模块勾选「系统框架」一次，之后无需再打开 LSPosed——在本应用选择/删除目标即可生效（全局注入 + 应用内过滤）。",
+                "Tip: tick \"System Framework\" for this module once in LSPosed Manager; afterwards you never need to open LSPosed again - add/remove targets right here (global injection + in-app filtering).",
+                "Совет: отметьте «Системный фреймворк» для модуля в LSPosed один раз — больше не нужно открывать LSPosed: выбирайте/удаляйте цели прямо здесь (глобальное внедрение + фильтрация в приложении)."));
+        scopeTip.setTextSize(12);
+        scopeTip.setTextColor(COLOR_GRAY);
+        LinearLayout.LayoutParams tipLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tipLp.topMargin = Math.round(2 * d);
+        tipLp.bottomMargin = Math.round(12 * d);
+        ll.addView(scopeTip, tipLp);
+
         // 语言
         addSettingsSection(ll, t("语言", "Language", "Язык"), d);
         String langName = LANG_EN.equals(currentLang) ? "English" : LANG_ZH.equals(currentLang) ? "中文" : "Русский";
@@ -1698,7 +1711,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.6.1 (versionCode 53)\n");
+                devInfo.append("Module Version: 3.7.0 (versionCode 54)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1952,9 +1965,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.6.1\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
-                        "Version: 3.6.1\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
-                        "Версия: 3.6.1\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.7.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
+                        "Version: 3.7.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
+                        "Версия: 3.7.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
