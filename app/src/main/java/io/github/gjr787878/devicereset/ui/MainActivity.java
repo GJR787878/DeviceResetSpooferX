@@ -847,6 +847,7 @@ public class MainActivity extends AppCompatActivity {
             String[] optTexts = {t("系统应用", "System apps", "Системные приложения"),
                     t("安装应用", "Installed apps", "Установленные приложения")};
             final int[] optModes = {1, 2};
+            final PopupWindow[] pwHolder = {null};
             for (int oi = 0; oi < 2; oi++) {
                 TextView o = new TextView(this);
                 o.setText(optTexts[oi] + (filterMode[0] == optModes[oi] ? "  ✓" : ""));
@@ -859,14 +860,15 @@ public class MainActivity extends AppCompatActivity {
                     filterMode[0] = (filterMode[0] == mm) ? 0 : mm;
                     filterGlass.setGlassSelected(filterMode[0] != 0);
                     applyPickerFilter(list, emptyTv, search, filterMode);
-                    pw.dismiss();
+                    pwHolder[0].dismiss();
                 });
                 pop.addView(o);
             }
-            final PopupWindow pw = new PopupWindow(pop,
+            PopupWindow pw = new PopupWindow(pop,
                     Math.round(172 * d), ViewGroup.LayoutParams.WRAP_CONTENT, true);
             pw.setOutsideTouchable(true);
             pw.setElevation(8 * d);
+            pwHolder[0] = pw;
             pw.showAsDropDown(btnFilter, 0, Math.round(6 * d));
         });
 
