@@ -1654,6 +1654,23 @@ public class MainActivity extends AppCompatActivity {
                     java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
                     os.writeBytes("ls -la /data/adb/lspd/ 2>/dev/null\n");
                     os.writeBytes("cat /data/adb/lspd/config/modules_config.json 2>/dev/null | head -100\n");
+                    os.writeBytes("echo '--- modules_config.db ---'\n");
+                    os.writeBytes("ls -la /data/adb/lspd/config/modules_config.db 2>/dev/null || echo NO_DB\n");
+                    os.writeBytes("S=''\n");
+                    os.writeBytes("for c in sqlite3 /system/xbin/sqlite3 /system/bin/sqlite3; do command -v \"$c\" >/dev/null 2>&1 && { S=\"$c\"; break; }; done\n");
+                    os.writeBytes("[ -z \"$S\" ] && [ -x /data/adb/magisk/busybox ] && S=/data/adb/magisk/busybox\n");
+                    os.writeBytes("if [ -n \"$S\" ] && [ -f /data/adb/lspd/config/modules_config.db ]; then\n");
+                    os.writeBytes("  echo '--- sqlite3: OK ---'\n");
+                    os.writeBytes("  echo '--- module row ---'\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT mid,module_pkg_name,enabled,auto_include,apk_path FROM modules WHERE module_pkg_name='io.github.gjr787878.devicereset';\" 2>/dev/null || echo NO_MODULE_ROW\n");
+                    os.writeBytes("  echo '--- scope rows ---'\n");
+                    os.writeBytes("  MID=$(\"$S\" /data/adb/lspd/config/modules_config.db \"SELECT mid FROM modules WHERE module_pkg_name='io.github.gjr787878.devicereset';\" 2>/dev/null | head -1)\n");
+                    os.writeBytes("  if [ -n \"$MID\" ]; then \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT app_pkg_name,user_id FROM scope WHERE mid=$MID;\" 2>/dev/null; else echo NO_MID; fi\n");
+                    os.writeBytes("  echo '--- all modules (mid/name/enabled) ---'\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT mid,module_pkg_name,enabled FROM modules;\" 2>/dev/null\n");
+                    os.writeBytes("else\n");
+                    os.writeBytes("  echo '--- sqlite3: UNAVAILABLE (no sqlite3/busybox) ---'\n");
+                    os.writeBytes("fi\n");
                     os.writeBytes("exit\n");
                     os.flush();
                     java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(su.getInputStream()));
@@ -1665,6 +1682,21 @@ public class MainActivity extends AppCompatActivity {
                     lsp.append("LSPosed config read error: ").append(e.getMessage()).append("\n");
                 }
                 writeFile(new java.io.File(tmpDir, "lsposed_status.txt"), lsp.toString());
+
+                // 6.5 自动同步诊断（lsp_sync.log）：显示模块是否在 LSPosed 中注册/启用、作用域是否写入
+                java.io.File syncLog = new java.io.File(getExternalFilesDir(null), "lsp_sync.log");
+                if (syncLog.exists()) {
+                    StringBuilder sl = new StringBuilder();
+                    sl.append("=== LSPosed Auto-Sync Log ===\n");
+                    sl.append("NO_DB=数据库不存在 | NO_SQLITE=无 sqlite3/busybox（同步未执行） | NO_MID=模块未注册 | SYNCED:n|pkgs=同步成功\n\n");
+                    try {
+                        java.io.BufferedReader sr = new java.io.BufferedReader(new java.io.FileReader(syncLog));
+                        String l;
+                        while ((l = sr.readLine()) != null) sl.append(l).append("\n");
+                        sr.close();
+                    } catch (Throwable ignored) {}
+                    writeFile(new java.io.File(tmpDir, "lsp_sync.log"), sl.toString());
+                }
 
                 // 6. 打包成 zip
                 java.io.File zipFile = new java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
@@ -1795,11 +1827,13 @@ public class MainActivity extends AppCompatActivity {
     // 模块 UI 内选目标后自动把目标包名写入 scope 表（只增不减，不删除用户手动勾选），
     // 这样无需打开 LSPosed 管理器；目标应用强制停止重开后即生效（作用域变更无需重启手机）。
     // 写库前自动备份 modules_config.db.drs_backup；校验失败自动回滚备份。全程静默。
+    // 同步结果写入 lsp_sync.log（模块外部目录），导出日志时可见，便于诊断。
     private void autoSyncScopeToLSPosed() {
         new Thread(() -> {
+            String detail = "not_run";
             try {
                 java.util.Set<String> targets = Config.getTargetPackages(this);
-                if (targets == null || targets.isEmpty()) return; // 无目标不同步，避免误清用户手动勾选
+                if (targets == null || targets.isEmpty()) { detail = "no_targets"; return; } // 无目标不同步，避免误清用户手动勾选
                 final String MOD = "io.github.gjr787878.devicereset";
                 final String DB = "/data/adb/lspd/config/modules_config.db";
                 StringBuilder sh = new StringBuilder();
@@ -1825,7 +1859,8 @@ public class MainActivity extends AppCompatActivity {
                     sh.append("run_sql \"INSERT OR IGNORE INTO scope(mid, app_pkg_name, user_id) VALUES($MID,'").append(p).append("',0);\" >/dev/null\n");
                 }
                 sh.append("CNT=$(run_sql \"SELECT count(*) FROM scope WHERE mid=$MID;\" | head -1)\n");
-                sh.append("echo \"SYNCED:$CNT\"\n");
+                sh.append("SCOPE=$(run_sql \"SELECT group_concat(app_pkg_name) FROM scope WHERE mid=$MID AND user_id=0;\" | head -1)\n");
+                sh.append("echo \"SYNCED:$CNT|$SCOPE\"\n");
                 sh.append("exit 0\n");
 
                 Process su = Runtime.getRuntime().exec("su");
@@ -1837,15 +1872,27 @@ public class MainActivity extends AppCompatActivity {
                 while ((l = r.readLine()) != null) out = l;
                 r.close();
                 su.waitFor();
+                detail = out.trim();
                 // 校验失败（库可能损坏）→ 用备份回滚，保证 LSPosed 配置安全
-                if (out.startsWith("SYNCED:0")) {
+                if (detail.startsWith("SYNCED:0")) {
                     Process su2 = Runtime.getRuntime().exec("su");
                     java.io.DataOutputStream os2 = new java.io.DataOutputStream(su2.getOutputStream());
                     os2.writeBytes("cp -f " + DB + ".drs_backup " + DB + " 2>/dev/null; echo ROLLED_BACK\n");
                     os2.writeBytes("exit\n");
                     os2.flush();
                     su2.waitFor();
+                    detail += "|ROLLED_BACK";
                 }
+            } catch (Throwable ignored) {
+                detail = "exception";
+            }
+            // 把同步诊断写入日志文件（模块自己的外部目录，无权限问题），导出日志时可见
+            try {
+                java.io.File f = new java.io.File(getExternalFilesDir(null), "lsp_sync.log");
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+                fos.write(("[" + new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
+                        .format(new java.util.Date()) + "] " + detail + "\n").getBytes("UTF-8"));
+                fos.close();
             } catch (Throwable ignored) {}
         }).start();
     }
