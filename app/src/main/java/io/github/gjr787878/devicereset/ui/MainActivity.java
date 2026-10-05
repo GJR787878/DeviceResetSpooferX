@@ -59,6 +59,12 @@ public class MainActivity extends AppCompatActivity {
     private final java.util.Set<String> scopeCache = new java.util.HashSet<>();
     private volatile boolean scopeLoaded = false;
     private volatile boolean scopeConnected = false;
+    // LSPosed 数据库真实状态（root 读 modules_config.db，不依赖 libxposed service）
+    private volatile boolean scopeDbLoaded = false;
+    private volatile boolean scopeDbEnabled = false;
+    private volatile boolean scopeDbSystem = false;
+    private volatile boolean scopeDbSelf = false;
+    private final java.util.Set<String> scopeDbTargets = new java.util.HashSet<>();
     private TextView lspStatusTv; // 设置页 LSPosed 框架状态行
 
     // ===== 三语字符串 =====
@@ -80,7 +86,8 @@ public class MainActivity extends AppCompatActivity {
         checkUpdate(false);
     }
 
-    /** 异步读取 LSPosed 作用域到缓存，用于主页显示「作用域✓/未授权」 */
+    /** 异步读取 LSPosed 作用域到缓存，用于主页显示「作用域✓/未授权」；
+     *  同时 root 读 LSPosed 配置库真实状态（libxposed service 未连接时兜底显示真实注入状态） */
     private void refreshScopeStatus() {
         new Thread(() -> {
             scopeConnected = LSPosedScopeHelper.isConnected();
@@ -90,21 +97,43 @@ public class MainActivity extends AppCompatActivity {
                 if (sc != null) scopeCache.addAll(sc);
             }
             scopeLoaded = true;
+            // root 读 db 兜底真实状态
+            Config.ScopeDbState dbs = Config.readLSPosedDbState(this);
+            if (dbs != null && dbs.dbOk) {
+                scopeDbEnabled = dbs.enabled;
+                scopeDbSystem = dbs.hasSystem;
+                scopeDbSelf = dbs.hasSelf;
+                synchronized (scopeDbTargets) {
+                    scopeDbTargets.clear();
+                    scopeDbTargets.addAll(dbs.targets);
+                }
+                scopeDbLoaded = true;
+            }
             runOnUiThread(() -> {
                 refreshAppList();
                 if (lspStatusTv != null) {
-                    if (!scopeConnected) {
-                        lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
-                                "LSPosed: not connected (module disabled or old framework)",
-                                "LSPosed: не подключён (модуль выключен или старая версия фреймворка)"));
-                        lspStatusTv.setTextColor(COLOR_GRAY);
-                    } else {
+                    if (scopeConnected) {
                         lspStatusTv.setText(t("LSPosed 框架：已连接，作用域 ",
                                 "LSPosed: connected, scope ",
                                 "LSPosed: подключён, область ") + scopeCache.size() + t(" 个应用",
                                 " app(s)",
                                 " приложений"));
                         lspStatusTv.setTextColor(COLOR_BLUE);
+                    } else if (scopeDbLoaded && scopeDbEnabled && scopeDbSystem && scopeDbSelf) {
+                        lspStatusTv.setText(t("LSPosed 框架：已注入（作用域已自动同步✓，重启后全部生效）",
+                                "LSPosed: injected (scope auto-synced✓, reboot to apply all)",
+                                "LSPosed: внедрён (область авто-синхр✓, перезагрузка для применения)"));
+                        lspStatusTv.setTextColor(COLOR_BLUE);
+                    } else if (scopeDbLoaded && scopeDbEnabled && scopeDbSystem) {
+                        lspStatusTv.setText(t("LSPosed 框架：已注入（全局模式✓）",
+                                "LSPosed: injected (global scope✓)",
+                                "LSPosed: внедрён (глобальная область✓)"));
+                        lspStatusTv.setTextColor(COLOR_BLUE);
+                    } else {
+                        lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
+                                "LSPosed: not connected (module disabled or old framework)",
+                                "LSPosed: не подключён (модуль выключен или старая версия фреймворка)"));
+                        lspStatusTv.setTextColor(COLOR_GRAY);
                     }
                 }
             });
@@ -113,21 +142,28 @@ public class MainActivity extends AppCompatActivity {
 
     /** 目标是否在 LSPosed 作用域内（框架已连接才有意义）。
      * 系统框架(system)/Android 系统(android) 已勾 = 全局注入模式（zygote 注入所有进程，
-     * MainHook 按 targets.txt 过滤），所有目标都算在作用域内。 */
+     * MainHook 按 targets.txt 过滤），所有目标都算在作用域内。
+     * 未连接 libxposed service 时用数据库真实状态兜底（root 读 scope 表）。 */
     private boolean isInScope(String pkg) {
         synchronized (scopeCache) {
-            if (!scopeLoaded || !scopeConnected) return false;
-            if (scopeCache.contains("system") || scopeCache.contains("android")) return true;
-            return scopeCache.contains(pkg);
+            if (scopeLoaded && scopeConnected) {
+                if (scopeCache.contains("system") || scopeCache.contains("android")) return true;
+                return scopeCache.contains(pkg);
+            }
+        }
+        synchronized (scopeDbTargets) {
+            return scopeDbLoaded && (scopeDbSystem || scopeDbTargets.contains(pkg));
         }
     }
 
     /** 是否为全局注入模式（系统框架已勾选） */
     private boolean isGlobalScope() {
         synchronized (scopeCache) {
-            return scopeLoaded && scopeConnected
-                    && (scopeCache.contains("system") || scopeCache.contains("android"));
+            if (scopeLoaded && scopeConnected) {
+                return scopeCache.contains("system") || scopeCache.contains("android");
+            }
         }
+        return scopeDbLoaded && scopeDbSystem;
     }
 
     @Override
@@ -1730,7 +1766,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.9.0 (versionCode 62)\n");
+                devInfo.append("Module Version: 3.9.1 (versionCode 63)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");

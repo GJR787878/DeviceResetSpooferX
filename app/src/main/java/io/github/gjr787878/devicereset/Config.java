@@ -51,6 +51,9 @@ public class Config {
         final Context ctx = context.getApplicationContext();
         StringBuilder log = new StringBuilder("=== LSPosed Auto-Sync Log ===\n");
         java.io.File logFile = new java.io.File(ctx.getExternalFilesDir(null), "lsp_sync.log");
+
+        // 同步成功后提示（主页顶部横幅会显示「已同步作用域」）
+        setScopeSyncPending(ctx, true);
         log.append("time=").append(System.currentTimeMillis()).append("\n");
         try {
             // 1. 内容未变化则跳过
@@ -155,6 +158,64 @@ public class Config {
             w.write(content);
             w.close();
         } catch (Throwable ignored) {}
+    }
+
+    // ===== LSPosed 数据库真实状态读取（主页「框架连接」显示用，不依赖 libxposed service） =====
+    public static final class ScopeDbState {
+        public boolean dbOk = false;      // 数据库可读
+        public boolean enabled = false;   // 模块在 LSPosed 已启用
+        public boolean hasSelf = false;   // 模块自身在作用域（libxposed service 能连接的前提）
+        public boolean hasSystem = false; // 系统框架在作用域（全局注入）
+        public java.util.Set<String> targets = new java.util.HashSet<>(); // 作用域中的目标包名
+    }
+
+    /** root 拷贝 db 到私有目录用 SQLiteDatabase 读取真实状态（不写库）。
+     * 返回 null 表示无 root / db 不可读。 */
+    public static ScopeDbState readLSPosedDbState(Context context) {
+        ScopeDbState st = new ScopeDbState();
+        try {
+            Context ctx = context.getApplicationContext();
+            if (!"0".equals(runSu("id -u").trim())) return null;
+            java.io.File tmpDir = new java.io.File(ctx.getFilesDir(), "lspd_read");
+            runSu("rm -rf '" + tmpDir.getAbsolutePath() + "' && mkdir -p '" + tmpDir.getAbsolutePath() + "'");
+            runSu("cp " + LSPD_DB + " '" + tmpDir.getAbsolutePath() + "/' 2>/dev/null; "
+                    + "cp " + LSPD_DB + "-wal '" + tmpDir.getAbsolutePath() + "/' 2>/dev/null; "
+                    + "cp " + LSPD_DB + "-shm '" + tmpDir.getAbsolutePath() + "/' 2>/dev/null; "
+                    + "chmod 666 '" + tmpDir.getAbsolutePath() + "'/* 2>/dev/null; echo OK");
+            java.io.File localDb = new java.io.File(tmpDir, "modules_config.db");
+            if (!localDb.exists() || !localDb.canRead()) return null;
+            SQLiteDatabase db = SQLiteDatabase.openDatabase(localDb.getAbsolutePath(), null,
+                    SQLiteDatabase.OPEN_READONLY);
+            try {
+                android.database.Cursor c = db.rawQuery(
+                        "SELECT enabled FROM modules_state WHERE module_pkg_name=? AND user_id=0", new String[]{MODULE_PKG});
+                if (c.moveToFirst()) st.enabled = c.getInt(0) == 1;
+                c.close();
+                c = db.rawQuery("SELECT app_pkg_name FROM scope WHERE module_pkg_name=?", new String[]{MODULE_PKG});
+                while (c.moveToNext()) {
+                    String p = c.getString(0);
+                    if (MODULE_PKG.equals(p)) st.hasSelf = true;
+                    else if ("system".equals(p)) st.hasSystem = true;
+                    else if (!"android".equals(p)) st.targets.add(p);
+                }
+                c.close();
+                st.dbOk = true;
+            } finally {
+                db.close();
+            }
+            runSu("rm -rf '" + tmpDir.getAbsolutePath() + "'");
+        } catch (Throwable ignored) {
+        }
+        return st;
+    }
+
+    /** 记录「作用域已同步、等待重启生效」标记（主页顶部横幅显示提示） */
+    private static final String KEY_SYNC_PENDING = "lsp_scope_sync_pending";
+    public static void setScopeSyncPending(Context context, boolean pending) {
+        getPrefs(context.getApplicationContext()).edit().putBoolean(KEY_SYNC_PENDING, pending).apply();
+    }
+    public static boolean isScopeSyncPending(Context context) {
+        return getPrefs(context.getApplicationContext()).getBoolean(KEY_SYNC_PENDING, false);
     }
 
     /**
