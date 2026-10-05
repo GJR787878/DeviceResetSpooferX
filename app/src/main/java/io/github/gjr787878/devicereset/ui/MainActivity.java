@@ -48,6 +48,8 @@ public class MainActivity extends AppCompatActivity {
     private Button navApps, navSettings;
     private LinearLayout appListContainer;
     private TextView appCountText;
+    // 页面视图缓存：切换 Tab 不再整页重建导致黑屏重载
+    private View cachedAppsPage, cachedSettingsPage;
     private GlassButtonDrawable[] hookGlass = new GlassButtonDrawable[7];
     private TextView[] hookTv = new TextView[7];
 
@@ -118,8 +120,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void switchTab(int idx) {
         boolean isApps = idx == 0;
+        // 只在首次进入时构建页面，之后复用缓存视图（避免黑屏重新加载）
+        if (isApps && cachedAppsPage == null) cachedAppsPage = buildAppsPage();
+        if (!isApps && cachedSettingsPage == null) cachedSettingsPage = buildSettingsPage();
         contentFrame.removeAllViews();
-        contentFrame.addView(isApps ? buildAppsPage() : buildSettingsPage());
+        contentFrame.addView(isApps ? cachedAppsPage : cachedSettingsPage);
         float d = getResources().getDisplayMetrics().density;
         GradientDrawable selBg = new GradientDrawable();
         selBg.setColor(0x330A84FF);
@@ -149,15 +154,29 @@ public class MainActivity extends AppCompatActivity {
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         ll.addView(title);
 
+        // 计数行：左侧手动刷新按钮 + 右侧计数（切换 Tab 不再自动重扫，需要时点刷新）
+        LinearLayout countRow = new LinearLayout(this);
+        countRow.setOrientation(LinearLayout.HORIZONTAL);
+        countRow.setGravity(Gravity.CENTER_VERTICAL);
+        Button btnRefresh = makeGlassBtn("↻", 13);
+        LinearLayout.LayoutParams refreshLp = new LinearLayout.LayoutParams(
+                Math.round(48 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
+        countRow.addView(btnRefresh, refreshLp);
+        btnRefresh.setOnClickListener(v -> refreshAppList());
+
         appCountText = new TextView(this);
         appCountText.setText("");
         appCountText.setTextSize(13);
         appCountText.setTextColor(COLOR_GRAY);
         appCountText.setGravity(Gravity.END);
         LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        countLp.leftMargin = Math.round(10 * d);
+        countRow.addView(appCountText, countLp);
+        LinearLayout.LayoutParams countRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        countLp.topMargin = Math.round(8 * d);
-        ll.addView(appCountText, countLp);
+        countRowLp.topMargin = Math.round(8 * d);
+        ll.addView(countRow, countRowLp);
 
         // 应用内直接选择任意已安装应用（选中即写入模块目标配置，无需先在 LSPosed 里逐个选择）
         Button btnAddApp = makeGlassBtn(t("＋ 选择应用（全部应用）", "＋ Select App (All Apps)", "＋ Выбрать приложение (все)"), 13);
@@ -248,6 +267,26 @@ public class MainActivity extends AppCompatActivity {
         row.addView(dot, new LinearLayout.LayoutParams(Math.round(12 * d), Math.round(12 * d)));
 
         row.setOnClickListener(v -> showAppDetailDialog(pkg, name));
+        // 长按删除：取消选择该目标应用并删除身份哨兵文件（不卸载应用本身）
+        row.setOnLongClickListener(v -> {
+            new AlertDialog.Builder(this)
+                    .setTitle(t("删除目标应用", "Remove Target App", "Удалить приложение"))
+                    .setMessage(t("确定删除「", "Remove \"", "Удалить «") + name
+                            + t("」？将取消选择并删除其身份哨兵文件（不会卸载应用本身）。",
+                                "\"? It will be deselected and its identity sentinel files deleted (the app itself is not uninstalled).",
+                                "»? Приложение будет убрано из целей, сторожевые файлы удалены (само приложение не удаляется)."))
+                    .setPositiveButton(t("删除", "Remove", "Удалить"), (d, w) -> {
+                        Config.removeTargetPackage(this, pkg);
+                        deleteIdentityFiles(pkg);
+                        refreshAppList();
+                        Toast.makeText(this,
+                                t("已删除: ", "Removed: ", "Удалено: ") + name,
+                                Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
+                    .show();
+            return true;
+        });
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rowLp.bottomMargin = Math.round(10 * d);
@@ -623,66 +662,184 @@ public class MainActivity extends AppCompatActivity {
 
     // ===== 应用内选择任意应用 =====
 
-    /** 列出全部带桌面入口的已安装应用，选中即添加为目标应用（生成身份 + 写入模块配置） */
+    /** 全部应用选择器：自定义可滚动弹窗（带搜索），列出全部已安装应用，选中即添加为目标 */
     private void showAllAppsPicker() {
-        final String loadingTitle = t("正在扫描", "Scanning", "Сканирование");
-        final String loadingMsg = t("正在加载全部应用...", "Loading all apps...", "Загрузка приложений...");
-        AlertDialog loading = new AlertDialog.Builder(this)
-                .setTitle(loadingTitle)
-                .setMessage(loadingMsg)
-                .setCancelable(false)
-                .show();
+        final float d = getResources().getDisplayMetrics().density;
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(Math.round(20 * d), Math.round(20 * d), Math.round(20 * d), Math.round(16 * d));
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(COLOR_DIALOG_BG);
+        rootBg.setCornerRadius(24 * d);
+        rootBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        root.setBackground(rootBg);
+
+        TextView title = new TextView(this);
+        title.setText(t("选择目标应用", "Select Target App", "Выберите приложение"));
+        title.setTextSize(18);
+        title.setTextColor(COLOR_WHITE);
+        title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
+        root.addView(title);
+
+        // 搜索框（胶囊样式，与输入框统一）
+        final EditText search = new EditText(this);
+        search.setHint(t("搜索应用...", "Search apps...", "Поиск..."));
+        search.setTextSize(14);
+        search.setTextColor(COLOR_WHITE);
+        search.setSingleLine(true);
+        GradientDrawable sBg = new GradientDrawable();
+        sBg.setColor(0x221C1C1E);
+        sBg.setCornerRadius(20 * d);
+        sBg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        search.setBackground(sBg);
+        search.setPadding(Math.round(14 * d), Math.round(10 * d), Math.round(14 * d), Math.round(10 * d));
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sLp.topMargin = Math.round(12 * d);
+        root.addView(search, sLp);
+
+        // 可滚动列表（ScrollView，确保能向下滑动选到全部应用）
+        ScrollView sv = new ScrollView(this);
+        final LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(list);
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        svLp.topMargin = Math.round(10 * d);
+        root.addView(sv, svLp);
+
+        final TextView emptyTv = new TextView(this);
+        emptyTv.setText(t("无匹配应用", "No matching apps", "Нет приложений"));
+        emptyTv.setTextColor(COLOR_GRAY);
+        emptyTv.setTextSize(13);
+        emptyTv.setGravity(Gravity.CENTER);
+        emptyTv.setVisibility(View.GONE);
+        LinearLayout.LayoutParams emptyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(emptyTv, emptyLp);
+
+        Button btnCancel = makeGlassBtn(t("取消", "Cancel", "Отмена"), 14);
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cancelLp.topMargin = Math.round(10 * d);
+        root.addView(btnCancel, cancelLp);
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setContentView(root);
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x88000000));
+            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        dialog.show();
+
+        // 后台加载全部已安装应用（含图标）
         new Thread(() -> {
             try {
-                Intent main = new Intent(Intent.ACTION_MAIN);
-                main.addCategory(Intent.CATEGORY_LAUNCHER);
-                final java.util.List<android.content.pm.ResolveInfo> ris = getPackageManager().queryIntentActivities(main, 0);
-                java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
-                for (android.content.pm.ResolveInfo ri : ris) {
-                    String pkg = ri.activityInfo.packageName;
-                    if (pkg == null) continue;
-                    if (pkg.equals(getPackageName()) || pkg.startsWith("io.github.gjr787878")) continue;
-                    CharSequence l = ri.loadLabel(getPackageManager());
-                    names.put(pkg, l != null && l.length() > 0 ? l.toString() : pkg);
+                final PackageManager pm = getPackageManager();
+                final java.util.List<ApplicationInfo> apps = pm.getInstalledApplications(0);
+                final java.util.List<AppEntry> entries = new java.util.ArrayList<>();
+                for (ApplicationInfo ai : apps) {
+                    if (ai.packageName.equals(getPackageName())
+                            || ai.packageName.startsWith("io.github.gjr787878")) continue;
+                    CharSequence l = pm.getApplicationLabel(ai);
+                    android.graphics.drawable.Drawable ic;
+                    try { ic = pm.getApplicationIcon(ai); } catch (Throwable t2) { ic = null; }
+                    entries.add(new AppEntry(l != null && l.length() > 0 ? l.toString() : ai.packageName,
+                            ai.packageName, ic));
                 }
-                final java.util.List<String> pkgs = new java.util.ArrayList<>(names.keySet());
-                final String[] items = new String[pkgs.size()];
-                java.util.Set<String> already = Config.getTargetPackages(this);
-                for (int i = 0; i < pkgs.size(); i++) {
-                    items[i] = names.get(pkgs.get(i)) + "\n" + pkgs.get(i)
-                            + (already.contains(pkgs.get(i)) ? "  ✓" : "");
-                }
+                java.util.Collections.sort(entries, (a, b) -> a.label.compareToIgnoreCase(b.label));
+                final java.util.Set<String> already = Config.getTargetPackages(this);
                 runOnUiThread(() -> {
-                    loading.dismiss();
-                    new AlertDialog.Builder(this)
-                            .setTitle(t("选择目标应用", "Select Target App", "Выберите приложение"))
-                            .setItems(items, (d, which) -> {
-                                String pkg = pkgs.get(which);
-                                getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
-                                Config.addTargetPackage(this, pkg);
-                                String json = readIdentityFile(pkg);
-                                if (json == null || !json.startsWith("{")) {
-                                    Identity nid = IdentityGenerator.generateRandom();
-                                    IdentityGenerator.fillMissing(nid);
-                                    json = nid.toJson();
-                                    writeIdentityFile(pkg, json);
-                                    writeExternalIdentityFile(pkg, json);
-                                }
-                                Toast.makeText(this,
-                                        t("已添加目标应用", "Target app added", "Приложение добавлено"),
-                                        Toast.LENGTH_SHORT).show();
-                                refreshAppList();
-                            })
-                            .setNegativeButton(t("取消", "Cancel", "Отмена"), null)
-                            .show();
+                    for (final AppEntry e : entries) {
+                        LinearLayout row = new LinearLayout(this);
+                        row.setOrientation(LinearLayout.HORIZONTAL);
+                        row.setGravity(Gravity.CENTER_VERTICAL);
+                        row.setPadding(Math.round(12 * d), Math.round(10 * d), Math.round(12 * d), Math.round(10 * d));
+                        row.setBackground(new GlassButtonDrawable(20 * d, 1 * d, false));
+                        row.setTag((e.label + " " + e.pkg).toLowerCase());
+
+                        ImageView ic = new ImageView(this);
+                        ic.setLayoutParams(new LinearLayout.LayoutParams(Math.round(36 * d), Math.round(36 * d)));
+                        if (e.icon != null) ic.setImageDrawable(e.icon);
+                        row.addView(ic);
+
+                        LinearLayout tc = new LinearLayout(this);
+                        tc.setOrientation(LinearLayout.VERTICAL);
+                        LinearLayout.LayoutParams tcLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                        tcLp.leftMargin = Math.round(12 * d);
+                        TextView n = new TextView(this);
+                        n.setText(e.label + (already.contains(e.pkg) ? "  ✓" : ""));
+                        n.setTextSize(15);
+                        n.setTextColor(COLOR_WHITE);
+                        TextView p = new TextView(this);
+                        p.setText(e.pkg);
+                        p.setTextSize(11);
+                        p.setTextColor(COLOR_GRAY);
+                        tc.addView(n);
+                        tc.addView(p);
+                        row.addView(tc, tcLp);
+
+                        row.setOnClickListener(v -> addTargetFromPicker(e.pkg, dialog));
+                        LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                        rLp.bottomMargin = Math.round(8 * d);
+                        list.addView(row, rLp);
+                    }
+                    // 搜索过滤
+                    search.addTextChangedListener(new android.text.TextWatcher() {
+                        public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                        public void onTextChanged(CharSequence s, int a, int b, int c) {
+                            String q = s.toString().toLowerCase();
+                            int shown = 0;
+                            for (int i = 0; i < list.getChildCount(); i++) {
+                                View child = list.getChildAt(i);
+                                boolean match = q.isEmpty() || String.valueOf(child.getTag()).contains(q);
+                                child.setVisibility(match ? View.VISIBLE : View.GONE);
+                                if (match) shown++;
+                            }
+                            emptyTv.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
+                        }
+                        public void afterTextChanged(android.text.Editable s) {}
+                    });
                 });
             } catch (Throwable e) {
-                runOnUiThread(() -> {
-                    loading.dismiss();
-                    Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                });
+                runOnUiThread(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
         }).start();
+    }
+
+    /** 选择器点选：写入目标配置，缺身份则生成，刷新列表并关闭弹窗 */
+    private void addTargetFromPicker(String pkg, Dialog dialog) {
+        getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
+        Config.addTargetPackage(this, pkg);
+        String json = readIdentityFile(pkg);
+        if (json == null || !json.startsWith("{")) {
+            Identity nid = IdentityGenerator.generateRandom();
+            IdentityGenerator.fillMissing(nid);
+            json = nid.toJson();
+            writeIdentityFile(pkg, json);
+            writeExternalIdentityFile(pkg, json);
+        }
+        Toast.makeText(this,
+                t("已添加目标应用", "Target app added", "Приложение добавлено"),
+                Toast.LENGTH_SHORT).show();
+        refreshAppList();
+        dialog.dismiss();
+    }
+
+    /** 选择器列表条目 */
+    private static class AppEntry {
+        final String label, pkg;
+        final android.graphics.drawable.Drawable icon;
+        AppEntry(String label, String pkg, android.graphics.drawable.Drawable icon) {
+            this.label = label;
+            this.pkg = pkg;
+            this.icon = icon;
+        }
     }
 
     // ===== 自动清空目标应用数据（Root）=====
@@ -691,6 +848,21 @@ public class MainActivity extends AppCompatActivity {
     private boolean isAutoClearAfterSave() {
         return getSharedPreferences("devicereset_ui", MODE_PRIVATE)
                 .getBoolean("auto_clear_after_save", true);
+    }
+
+    /** 删除某应用的内部/外部身份哨兵与运行时文件（长按删除目标时调用，需 Root） */
+    private void deleteIdentityFiles(String pkg) {
+        try {
+            Process su = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            os.writeBytes("rm -f '/data/data/" + pkg + "/files/.identity_sentinel' "
+                    + "'/data/data/" + pkg + "/files/.identity_runtime' "
+                    + "'/sdcard/Android/data/" + pkg + "/files/.identity_sentinel' "
+                    + "'/sdcard/Android/data/" + pkg + "/files/.identity_runtime' 2>/dev/null\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            su.waitFor();
+        } catch (Throwable ignored) {}
     }
 
     /** 写外部存储哨兵备份（/sdcard/Android/data/<pkg>/files/.identity_sentinel），模块可读 */
@@ -1113,7 +1285,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.1.0 (versionCode 45)\n");
+                devInfo.append("Module Version: 3.2.0 (versionCode 46)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1309,9 +1481,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.1.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
-                        "Version: 3.1.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
-                        "Версия: 3.1.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется к приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.2.0\n\n清除应用数据后自动生成全新设备识别码的LSPosed模块。\n\n直接对LSPosed作用域中勾选的应用生效。\n支持中文 / English / Русский",
+                        "Version: 3.2.0\n\nLSPosed module that auto-generates new device identity after clearing app data.\n\nApplies to apps checked in LSPosed scope.\nSupports Chinese / English / Russian",
+                        "Версия: 3.2.0\n\nМодуль LSPosed, автоматически генерирующий новую идентификацию устройства.\n\nПрименяется к приложениям, отмеченным в области LSPosed.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
