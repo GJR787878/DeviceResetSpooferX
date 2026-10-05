@@ -111,10 +111,22 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 目标是否在 LSPosed 作用域内（框架已连接才有意义） */
+    /** 目标是否在 LSPosed 作用域内（框架已连接才有意义）。
+     * 系统框架(system)/Android 系统(android) 已勾 = 全局注入模式（zygote 注入所有进程，
+     * MainHook 按 targets.txt 过滤），所有目标都算在作用域内。 */
     private boolean isInScope(String pkg) {
         synchronized (scopeCache) {
-            return scopeLoaded && scopeConnected && scopeCache.contains(pkg);
+            if (!scopeLoaded || !scopeConnected) return false;
+            if (scopeCache.contains("system") || scopeCache.contains("android")) return true;
+            return scopeCache.contains(pkg);
+        }
+    }
+
+    /** 是否为全局注入模式（系统框架已勾选） */
+    private boolean isGlobalScope() {
+        synchronized (scopeCache) {
+            return scopeLoaded && scopeConnected
+                    && (scopeCache.contains("system") || scopeCache.contains("android"));
         }
     }
 
@@ -336,12 +348,16 @@ public class MainActivity extends AppCompatActivity {
         dot.setVisibility(hasIdentity ? View.VISIBLE : View.INVISIBLE);
         row.addView(dot, new LinearLayout.LayoutParams(Math.round(12 * d), Math.round(12 * d)));
 
-        // 作用域状态：框架已连接时显示「作用域✓」或「未授权」，一眼看清是否同步到 LSPosed
+        // 作用域状态：框架已连接时显示「作用域✓(全局/精确)」或「未授权」，一眼看清是否同步到 LSPosed
         if (scopeLoaded) {
             TextView scopeTv = new TextView(this);
             scopeTv.setTextSize(10);
             if (isInScope(pkg)) {
-                scopeTv.setText(t("作用域✓", "Scoped✓", "В области✓"));
+                if (isGlobalScope()) {
+                    scopeTv.setText(t("作用域✓全局", "Scoped✓global", "В области✓глоб"));
+                } else {
+                    scopeTv.setText(t("作用域✓", "Scoped✓", "В области✓"));
+                }
                 scopeTv.setTextColor(COLOR_BLUE);
             } else {
                 scopeTv.setText(t("未授权", "Not scoped", "Не в области"));
@@ -1711,7 +1727,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.8.0 (versionCode 56)\n");
+                devInfo.append("Module Version: 3.8.1 (versionCode 57)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1729,6 +1745,15 @@ public class MainActivity extends AppCompatActivity {
                     devInfo.append("Root: GRANTED\n");
                 } catch (Throwable e) {
                     devInfo.append("Root: FAILED - ").append(e.getMessage()).append("\n");
+                }
+                // libxposed getScope 实际输出（确认系统框架在 getScope 中的表示）
+                devInfo.append("--- libxposed getScope ---\n");
+                devInfo.append("connected=").append(LSPosedScopeHelper.isConnected()).append("\n");
+                try {
+                    java.util.List<String> sc = LSPosedScopeHelper.getScope();
+                    devInfo.append("scope=").append(sc == null ? "null" : sc.toString()).append("\n");
+                } catch (Throwable te) {
+                    devInfo.append("getScope error: ").append(te.getMessage()).append("\n");
                 }
                 writeFile(new java.io.File(tmpDir, "device_info.txt"), devInfo.toString());
 
