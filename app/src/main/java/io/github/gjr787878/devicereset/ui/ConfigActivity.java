@@ -66,7 +66,7 @@ public class ConfigActivity extends AppCompatActivity {
             initViews();
             loadConfig();
         } catch (Throwable t) {
-            Toast.makeText(this, "初始化失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, (LANG_ZH.equals(currentLang) ? "初始化失败：" : "Init failed: ") + t.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -409,7 +409,7 @@ public class ConfigActivity extends AppCompatActivity {
     private void showIdentityDialog(String packageName, String json) {
         Identity id = Identity.fromJson(json);
         if (id == null) {
-            Toast.makeText(this, "解析失败", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, LANG_ZH.equals(currentLang) ? "解析失败" : "Parse failed", Toast.LENGTH_SHORT).show();
             return;
         }
         boolean isZh = LANG_ZH.equals(currentLang);
@@ -537,13 +537,13 @@ public class ConfigActivity extends AppCompatActivity {
         boolean isEn = LANG_EN.equals(currentLang);
         String message, positive;
         if (isZh) {
-            message = "版本：3.5.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский";
+            message = "版本：3.5.1\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский";
             positive = "确定";
         } else if (isEn) {
-            message = "Version: 3.5.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports 中文 / English / Русский";
+            message = "Version: 3.5.1\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports 中文 / English / Русский";
             positive = "OK";
         } else {
-            message = "Версия: 3.5.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский";
+            message = "Версия: 3.5.1\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский";
             positive = "ОК";
         }
         new AlertDialog.Builder(this)

@@ -430,12 +430,10 @@ public class MainActivity extends AppCompatActivity {
             Config.setIdentity(this, pkg, rndJson);
             writeIdentityFile(pkg, rndJson);
             writeExternalIdentityFile(pkg, rndJson);
-            Toast.makeText(this, t("修改成功：已生成随机身份。\n重新打开目标应用后生效。",
-                            "Saved: random identity generated.\nIt takes effect after you reopen the target app.",
-                            "Сохранено: создана случайная идентичность.\nВступит в силу после повторного открытия приложения."),
-                    Toast.LENGTH_LONG).show();
             dialog.dismiss();
             refreshAppList();
+            // 保存成功后询问是否清空数据（部分应用需清空数据才能立即生效）
+            showClearDataPrompt(pkg, rndJson);
         });
         btnCustom.setOnClickListener(v -> {
             dialog.dismiss();
@@ -624,12 +622,10 @@ public class MainActivity extends AppCompatActivity {
             Config.setIdentity(this, pkg, json);
             writeIdentityFile(pkg, json);
             writeExternalIdentityFile(pkg, json);
-            Toast.makeText(this, t("修改成功：身份已保存。\n重新打开目标应用后生效。",
-                            "Saved: identity saved.\nIt takes effect after you reopen the target app.",
-                            "Сохранено: идентичность сохранена.\nВступит в силу после повторного открытия приложения."),
-                    Toast.LENGTH_LONG).show();
             dialog.dismiss();
             refreshAppList();
+            // 保存成功后询问是否清空数据（部分应用需清空数据才能立即生效）
+            showClearDataPrompt(pkg, json);
         });
     }
 
@@ -1096,6 +1092,28 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable ignored) {}
     }
 
+    /** 保存/随机成功后：询问是否清空目标应用数据（三语；部分应用需清空数据才能立即生效） */
+    private void showClearDataPrompt(final String pkg, final String json) {
+        showGlassConfirm(
+                t("是否清空数据？", "Clear data now?", "Очистить данные сейчас?"),
+                t("修改成功。部分应用需要清空数据并重新打开才能生效：\n将清除目标应用的缓存、数据库、偏好设置（保留伪装身份），并自动重启该应用。\n选择「取消」则保持现状，伪装值在下次重新打开目标应用时生效。",
+                  "Saved. Some apps need their data cleared and to be reopened before the new identity applies:\nThis clears the target app's cache, databases and prefs (spoofed identity is kept), then restarts it automatically.\nChoose Cancel to keep as-is; the identity applies the next time you open the target app.",
+                  "Сохранено. Некоторым приложениям требуется очистка данных и повторное открытие, чтобы применилась новая идентичность:\nБудут удалены кэш, базы данных и настройки приложения (подменённая идентичность сохраняется), приложение будет перезапущено автоматически.\nВыберите «Отмена» — идентичность применится при следующем открытии приложения."),
+                t("清空所有数据", "Clear All Data", "Очистить все данные"),
+                true,
+                () -> {
+                    new Thread(() -> {
+                        final boolean ok = clearTargetAppData(pkg, json);
+                        runOnUiThread(() -> Toast.makeText(this, ok
+                                ? t("已清空并重启: ", "Cleared & restarted: ", "Очищено и перезапущено: ") + pkg
+                                : t("清空失败，请确认已授予ROOT权限（身份已保存，下次打开应用生效）",
+                                        "Clear failed, ensure ROOT access (identity saved; it applies on next open)",
+                                        "Ошибка очистки, проверьте Root-права (идентичность сохранена, применится при следующем открытии)"),
+                                Toast.LENGTH_LONG).show());
+                    }).start();
+                });
+    }
+
     /** 手动清空某应用数据并重启（自定义玻璃弹窗） */
     private void showClearDataDialog() {
         final float d = getResources().getDisplayMetrics().density;
@@ -1232,14 +1250,7 @@ public class MainActivity extends AppCompatActivity {
         String langName = LANG_EN.equals(currentLang) ? "English" : LANG_ZH.equals(currentLang) ? "中文" : "Русский";
         Button btnLang = makeGlassBtn(t("语言: ", "Language: ", "Язык: ") + langName, 15);
         ll.addView(btnLang, makeFormLp(d));
-        btnLang.setOnClickListener(v -> {
-            if (LANG_EN.equals(currentLang)) currentLang = LANG_ZH;
-            else if (LANG_ZH.equals(currentLang)) currentLang = LANG_RU;
-            else currentLang = LANG_EN;
-            getSharedPreferences("devicereset_ui", MODE_PRIVATE)
-                    .edit().putString(PREFS_LANG, currentLang).apply();
-            recreate();
-        });
+        btnLang.setOnClickListener(v -> showLanguageDialog());
 
         // 检查更新
         Button btnUpdate = makeGlassBtn(t("检查更新", "Check Update", "Проверить обновления"), 15);
@@ -1508,7 +1519,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.5.0 (versionCode 50)\n");
+                devInfo.append("Module Version: 3.5.1 (versionCode 51)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1693,7 +1704,21 @@ public class MainActivity extends AppCompatActivity {
                     try {
                         Config.removeIdentity(this, pkg);
                         boolean ok = SentinelDetector.resetIdentity(pkg, this);
-                        Toast.makeText(this, ok ? t("已重置 ", "Reset ", "Сброшена ") + pkg : t("已删除身份配置（删除哨兵文件失败，可能需要ROOT权限）", "Identity config removed (sentinel removal failed, ROOT may be required)", "Конфигурация идентичности удалена (не удалось удалить файлы-sentinel, возможно нужен Root)"), Toast.LENGTH_LONG).show();
+                        if (ok) {
+                            // 强停目标应用，使其下次启动按「无身份」恢复真实设备值
+                            try {
+                                Process su = Runtime.getRuntime().exec("su");
+                                java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+                                os.writeBytes("am force-stop " + pkg + " 2>/dev/null\nexit\n");
+                                os.flush();
+                                su.waitFor();
+                            } catch (Throwable ignored) {}
+                        }
+                        Toast.makeText(this, ok ? t("已重置: ", "Reset: ", "Сброшена: ") + pkg
+                                : t("重置失败，请确认已授予ROOT权限（已删除身份配置，下次打开应用生效）",
+                                        "Reset failed, ensure ROOT access (identity config removed; applies on next open)",
+                                        "Ошибка сброса, проверьте Root-права (конфигурация удалена; применится при следующем открытии)"),
+                                Toast.LENGTH_LONG).show();
                         refreshAppList();
                     } catch (Throwable t) {
                         Toast.makeText(this, t("错误: ", "Error: ", "Ошибка: ") + t.getMessage(), Toast.LENGTH_LONG).show();
@@ -1706,9 +1731,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.5.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
-                        "Version: 3.5.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
-                        "Версия: 3.5.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.5.1\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
+                        "Version: 3.5.1\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
+                        "Версия: 3.5.1\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
@@ -1771,6 +1796,61 @@ public class MainActivity extends AppCompatActivity {
                 }
             } catch (Throwable ignored) {}
         }).start();
+    }
+
+    /** 语言选择：玻璃风格三选弹窗（中文 / English / Русский），点选即保存并立即全局生效 */
+    private void showLanguageDialog() {
+        final float d = getResources().getDisplayMetrics().density;
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(Math.round(20 * d), Math.round(20 * d), Math.round(20 * d), Math.round(18 * d));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(COLOR_DIALOG_BG);
+        bg.setCornerRadius(24 * d);
+        bg.setStroke(Math.round(1 * d), 0x55FFFFFF);
+        root.setBackground(bg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(t("选择语言", "Select Language", "Выберите язык"));
+        tvTitle.setTextSize(17);
+        tvTitle.setTextColor(COLOR_WHITE);
+        tvTitle.setTypeface(tvTitle.getTypeface(), android.graphics.Typeface.BOLD);
+        root.addView(tvTitle);
+
+        final String[][] opts = { {"中文", LANG_ZH}, {"English", LANG_EN}, {"Русский", LANG_RU} };
+        for (final String[] opt : opts) {
+            final boolean sel = opt[1].equals(currentLang);
+            TextView o = new TextView(this);
+            o.setText(opt[0] + (sel ? "  ✓" : ""));
+            o.setTextSize(15);
+            o.setTextColor(sel ? COLOR_BLUE : COLOR_WHITE);
+            o.setPadding(Math.round(14 * d), Math.round(12 * d), Math.round(14 * d), Math.round(12 * d));
+            o.setBackground(new GlassButtonDrawable(20 * d, sel ? 2 * d : 1 * d, sel));
+            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            olp.topMargin = Math.round(10 * d);
+            root.addView(o, olp);
+            o.setOnClickListener(vo -> {
+                if (!opt[1].equals(currentLang)) {
+                    getSharedPreferences("devicereset_ui", MODE_PRIVATE)
+                            .edit().putString(PREFS_LANG, opt[1]).apply();
+                    currentLang = opt[1];
+                }
+                dialog.dismiss();
+                recreate(); // 立即全局刷新界面语言
+            });
+        }
+
+        dialog.setContentView(root);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x88000000));
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
     }
 
     // ===== 更新检测（保留原项目逻辑） =====

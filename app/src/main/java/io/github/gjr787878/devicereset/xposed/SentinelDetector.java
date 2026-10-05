@@ -181,14 +181,27 @@ public class SentinelDetector {
         }
     }
 
+    /**
+     * 重置身份：root 删除目标应用的内部+外部哨兵（含运行时文件）。
+     * 必须用 root：第三方应用无权删除其他应用私有目录文件（createPackageContext 方式无效）；
+     * 且必须同时删外部哨兵，否则 MainHook 会从外部备份恢复旧伪装值（重置形同虚设）。
+     */
     public static boolean resetIdentity(String packageName, Context context) {
         try {
-            Context targetContext = context.createPackageContext(packageName,
-                    Context.MODE_PRIVATE | Context.CONTEXT_IGNORE_SECURITY);
-            File sentinel = new File(targetContext.getFilesDir(), SENTINEL_FILE);
-            if (sentinel.exists()) {
-                sentinel.delete();
+            String[] paths = {
+                    "/data/user/0/" + packageName + "/files/.identity_sentinel",
+                    "/data/user/0/" + packageName + "/files/.identity_runtime",
+                    "/sdcard/Android/data/" + packageName + "/files/.identity_sentinel",
+                    "/sdcard/Android/data/" + packageName + "/files/.identity_runtime"
+            };
+            Process su = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            for (String p : paths) {
+                os.writeBytes("rm -f '" + p + "' 2>/dev/null\n");
             }
+            os.writeBytes("exit\n");
+            os.flush();
+            su.waitFor();
             cachedIdentity = null;
             checked = false;
             return true;
