@@ -348,11 +348,14 @@ public class MainActivity extends AppCompatActivity {
         dot.setVisibility(hasIdentity ? View.VISIBLE : View.INVISIBLE);
         row.addView(dot, new LinearLayout.LayoutParams(Math.round(12 * d), Math.round(12 * d)));
 
-        // 作用域状态：框架已连接时显示「作用域✓(全局/精确)」或「未授权」，一眼看清是否同步到 LSPosed
+        // 作用域状态：未连接显示「框架未连接」，已连接按全局/精确/未授权三态显示
         if (scopeLoaded) {
             TextView scopeTv = new TextView(this);
             scopeTv.setTextSize(10);
-            if (isInScope(pkg)) {
+            if (!scopeConnected) {
+                scopeTv.setText(t("框架未连接", "No fw", "Нет фрейм"));
+                scopeTv.setTextColor(COLOR_GRAY);
+            } else if (isInScope(pkg)) {
                 if (isGlobalScope()) {
                     scopeTv.setText(t("作用域✓全局", "Scoped✓global", "В области✓глоб"));
                 } else {
@@ -1727,7 +1730,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.8.1 (versionCode 57)\n");
+                devInfo.append("Module Version: 3.8.3 (versionCode 59)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1785,6 +1788,13 @@ public class MainActivity extends AppCompatActivity {
                     os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.identity_sentinel\"; if [ -f \"$f\" ]; then echo \"FOUND: $pkg ($(wc -c < \"$f\") bytes)\"; fi; done\n");
                     os.writeBytes("echo '--- RUNTIME FILES ---'\n");
                     os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.identity_runtime\"; if [ -f \"$f\" ]; then echo \"RUNTIME: $pkg\"; fi; done\n");
+                    os.writeBytes("echo '--- HOOK LOGS (真授权证据) ---'\n");
+                    os.writeBytes("for d in /sdcard/Android/data/*/; do pkg=$(basename \"$d\"); f=\"$d/files/.drs_hook.log\"; if [ -f \"$f\" ]; then echo \"HOOKED: $pkg\"; cat \"$f\"; fi; done\n");
+                    os.writeBytes("echo '--- targets.txt 权限链 ---'\n");
+                    os.writeBytes("ls -ld /data/data/io.github.gjr787878.devicereset 2>&1\n");
+                    os.writeBytes("ls -la /data/data/io.github.gjr787878.devicereset/files/ 2>&1\n");
+                    os.writeBytes("echo '--- targets.txt 内容 ---'\n");
+                    os.writeBytes("cat /data/data/io.github.gjr787878.devicereset/files/targets.txt 2>&1\n");
                     os.writeBytes("exit\n");
                     os.flush();
                     java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(su.getInputStream()));

@@ -78,6 +78,20 @@ public class Config {
             f.setReadable(true, false); // chmod 644，hook 进程可读
         } catch (Throwable ignored) {
         }
+        // 关键：目录链也必须放开执行/读权限，否则被注入的目标进程进不了
+        // /data/data/模块/files 目录，readTargetsFile 必败 → 全局注入全部跳过。
+        // （有 root 才有效；无 root 时 targets 机制不可用，静默跳过不打扰）
+        try {
+            Process su = Runtime.getRuntime().exec("su");
+            java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
+            os.writeBytes("chmod 755 /data/data/" + context.getPackageName() + "\n");
+            os.writeBytes("chmod 755 /data/data/" + context.getPackageName() + "/files\n");
+            os.writeBytes("chmod 666 /data/data/" + context.getPackageName() + "/files/targets.txt\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            su.waitFor();
+        } catch (Throwable ignored) {
+        }
     }
 
     // ===== 身份主存储（模块配置，手动触发写入，UI 无需 Root） =====

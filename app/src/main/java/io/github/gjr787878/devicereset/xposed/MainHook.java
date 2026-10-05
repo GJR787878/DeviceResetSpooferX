@@ -92,10 +92,12 @@ public class MainHook implements IXposedHookLoadPackage {
 
             // 身份读取优先级：哨兵文件（手动触发写入，chmod 666，最可靠）→ 模块配置（XSharedPreferences 兜底）
             Identity identity = null;
+            boolean identityFromSentinel = false;
             try {
                 identity = SentinelDetector.checkAndGetIdentityByDirs(filesDir, externalFilesDir);
             } catch (Throwable ignored) {}
             if (identity != null) {
+                identityFromSentinel = true;
                 XposedBridge.log("[DeviceReset] Identity loaded from sentinel: androidId=" + identity.androidId
                         + ", model=" + identity.model + ", brand=" + identity.brand);
             } else {
@@ -115,6 +117,7 @@ public class MainHook implements IXposedHookLoadPackage {
             if (identity == null) {
                 XposedBridge.log("[DeviceReset] no identity for " + lpparam.packageName
                         + ", skip hooks (identity must be manually triggered in module UI)");
+                writeHookLog(lpparam.packageName, "target hit but NO identity -> skipped");
                 return;
             }
 
@@ -145,9 +148,29 @@ public class MainHook implements IXposedHookLoadPackage {
             }
 
             XposedBridge.log("[DeviceReset] ALL hooks installed successfully for " + lpparam.packageName);
+            writeHookLog(lpparam.packageName, "ALL hooks installed, identity source="
+                    + (identityFromSentinel ? "sentinel" : "module-config"));
         } catch (Throwable t) {
             XposedBridge.log("[DeviceReset] FATAL error: " + t.getMessage());
             XposedBridge.log(t);
+        }
+    }
+
+    /** 在目标应用的外部目录写注入证据日志（目标进程有权限写自己包名的外部目录）。
+     * 目的：导出日志时可确认「真授权」——MainHook 是否真的在目标进程执行、身份是否命中。 */
+    private void writeHookLog(String pkg, String msg) {
+        try {
+            java.io.File ext = new java.io.File(android.os.Environment.getExternalStorageDirectory(),
+                    "Android/data/" + pkg + "/files");
+            ext.mkdirs();
+            java.io.File f = new java.io.File(ext, ".drs_hook.log");
+            StringBuilder sb = new StringBuilder();
+            sb.append("time=").append(new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US)
+                    .format(new java.util.Date())).append(" pkg=").append(pkg).append(" ").append(msg).append('\n');
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+            fos.write(sb.toString().getBytes("UTF-8"));
+            fos.close();
+        } catch (Throwable ignored) {
         }
     }
 
