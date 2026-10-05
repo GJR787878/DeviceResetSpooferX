@@ -1668,6 +1668,12 @@ public class MainActivity extends AppCompatActivity {
                     os.writeBytes("  if [ -n \"$MID\" ]; then \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT app_pkg_name,user_id FROM scope WHERE mid=$MID;\" 2>/dev/null; else echo NO_MID; fi\n");
                     os.writeBytes("  echo '--- all modules (mid/name/enabled) ---'\n");
                     os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT mid,module_pkg_name,enabled FROM modules;\" 2>/dev/null\n");
+                    os.writeBytes("  echo '--- real schema (tables/columns) ---'\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \".tables\" 2>/dev/null\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"PRAGMA table_info(modules);\" 2>/dev/null\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"PRAGMA table_info(scope);\" 2>/dev/null\n");
+                    os.writeBytes("  echo '--- modules raw rows ---'\n");
+                    os.writeBytes("  \"$S\" /data/adb/lspd/config/modules_config.db \"SELECT * FROM modules LIMIT 5;\" 2>/dev/null\n");
                     os.writeBytes("else\n");
                     os.writeBytes("  echo '--- sqlite3: UNAVAILABLE (no sqlite3/busybox) ---'\n");
                     os.writeBytes("fi\n");
@@ -1827,6 +1833,8 @@ public class MainActivity extends AppCompatActivity {
     // 模块 UI 内选目标后自动把目标包名写入 scope 表（只增不减，不删除用户手动勾选），
     // 这样无需打开 LSPosed 管理器；目标应用强制停止重开后即生效（作用域变更无需重启手机）。
     // 写库前自动备份 modules_config.db.drs_backup；校验失败自动回滚备份。全程静默。
+    // 关键：不同 LSPosed 版本表结构可能不同（如 Android 16 新版），
+    // 先 PRAGMA table_info 探测真实列名，按实际存在的列自适应拼 SQL，避免静默失败。
     // 同步结果写入 lsp_sync.log（模块外部目录），导出日志时可见，便于诊断。
     private void autoSyncScopeToLSPosed() {
         new Thread(() -> {
@@ -1845,21 +1853,49 @@ public class MainActivity extends AppCompatActivity {
                 sh.append("[ -z \"$SQLITE\" ] && [ -x /data/adb/magisk/busybox ] && BUSY=/data/adb/magisk/busybox\n");
                 sh.append("[ -z \"$SQLITE\" ] && [ -z \"$BUSY\" ] && { echo NO_SQLITE; exit 0; }\n");
                 sh.append("run_sql() { if [ -n \"$SQLITE\" ]; then \"$SQLITE\" \"$DB\" \"$1\" 2>/dev/null; else \"$BUSY\" sqlite3 \"$DB\" \"$1\" 2>/dev/null; fi; }\n");
+                // 探测表结构：modules / scope 的真实列名（不同 LSPosed 版本可能不同）
+                sh.append("MCOLS=$(run_sql \"PRAGMA table_info(modules);\" | awk -F'|' '{print $2}' | tr '\\n' ',')\n");
+                sh.append("SCOLS=$(run_sql \"PRAGMA table_info(scope);\" | awk -F'|' '{print $2}' | tr '\\n' ',')\n");
+                sh.append("[ -z \"$MCOLS\" ] && { echo NO_MODULES_TABLE\"|\"$MCOLS; exit 0; }\n");
+                sh.append("echo \"MCOLS=$MCOLS\"\n");
+                sh.append("echo \"SCOLS=$SCOLS\"\n");
                 sh.append("MOD=").append(MOD).append("\n");
-                sh.append("MID=$(run_sql \"SELECT mid FROM modules WHERE module_pkg_name='$MOD';\" | head -1)\n");
+                sh.append("has() { echo \"$1\" | tr ',' '\\n' | grep -qx \"$2\" && echo 1 || echo 0; }\n");
+                // 模块行存在性查询（列名自适应）
+                sh.append("MID=\"\"\n");
+                sh.append("if [ \"$(has \"$MCOLS\" module_pkg_name)\" = 1 ]; then\n");
+                sh.append("  MID=$(run_sql \"SELECT mid FROM modules WHERE module_pkg_name='$MOD';\" | head -1)\n");
+                sh.append("fi\n");
+                // 不存在则插入新行（只写真实存在的列）
                 sh.append("if [ -z \"$MID\" ]; then\n");
                 sh.append("  APK=$(pm path \"$MOD\" 2>/dev/null | sed 's/package://' | head -1)\n");
-                sh.append("  run_sql \"INSERT OR REPLACE INTO modules(module_pkg_name, apk_path, enabled, auto_include) VALUES('$MOD','$APK',1,0);\" >/dev/null\n");
+                sh.append("  INS=\"INSERT OR REPLACE INTO modules(module_pkg_name\"\n");
+                sh.append("  [ \"$(has \"$MCOLS\" apk_path)\" = 1 ] && INS=\"$INS,apk_path\"\n");
+                sh.append("  [ \"$(has \"$MCOLS\" enabled)\" = 1 ] && INS=\"$INS,enabled\"\n");
+                sh.append("  [ \"$(has \"$MCOLS\" auto_include)\" = 1 ] && INS=\"$INS,auto_include\"\n");
+                sh.append("  INS=\"$INS) VALUES('$MOD'\"\n");
+                sh.append("  [ \"$(has \"$MCOLS\" apk_path)\" = 1 ] && INS=\"$INS,'$APK'\"\n");
+                sh.append("  [ \"$(has \"$MCOLS\" enabled)\" = 1 ] && INS=\"$INS,1\"\n");
+                sh.append("  [ \"$(has \"$MCOLS\" auto_include)\" = 1 ] && INS=\"$INS,0\"\n");
+                sh.append("  INS=\"$INS);\"\n");
+                sh.append("  run_sql \"$INS\" >/dev/null\n");
                 sh.append("  MID=$(run_sql \"SELECT mid FROM modules WHERE module_pkg_name='$MOD';\" | head -1)\n");
                 sh.append("else\n");
-                sh.append("  run_sql \"UPDATE modules SET enabled=1 WHERE mid=$MID;\" >/dev/null\n");
+                sh.append("  [ \"$(has \"$MCOLS\" enabled)\" = 1 ] && run_sql \"UPDATE modules SET enabled=1 WHERE mid=$MID;\" >/dev/null\n");
                 sh.append("fi\n");
                 sh.append("[ -z \"$MID\" ] && { echo NO_MID; exit 0; }\n");
+                // scope 写入（列名自适应）
+                sh.append("if [ \"$(has \"$SCOLS\" app_pkg_name)\" = 1 ]; then\n");
+                sh.append("  for p in ");
                 for (String p : targets) {
-                    sh.append("run_sql \"INSERT OR IGNORE INTO scope(mid, app_pkg_name, user_id) VALUES($MID,'").append(p).append("',0);\" >/dev/null\n");
+                    sh.append(p).append(" ");
                 }
+                sh.append("; do\n");
+                sh.append("    run_sql \"INSERT OR IGNORE INTO scope(mid,app_pkg_name) VALUES($MID,'$p');\" >/dev/null\n");
+                sh.append("  done\n");
+                sh.append("fi\n");
                 sh.append("CNT=$(run_sql \"SELECT count(*) FROM scope WHERE mid=$MID;\" | head -1)\n");
-                sh.append("SCOPE=$(run_sql \"SELECT group_concat(app_pkg_name) FROM scope WHERE mid=$MID AND user_id=0;\" | head -1)\n");
+                sh.append("SCOPE=$(run_sql \"SELECT group_concat(app_pkg_name) FROM scope WHERE mid=$MID;\" | head -1)\n");
                 sh.append("echo \"SYNCED:$CNT|$SCOPE\"\n");
                 sh.append("exit 0\n");
 
