@@ -315,9 +315,8 @@ public class MainActivity extends AppCompatActivity {
 
     // ===== 应用详情弹窗 =====
     private void showAppDetailDialog(String pkg, String appName) {
-        // 身份读取：模块配置（手动触发写入，无需 Root）→ 旧哨兵文件（兼容旧版）
-        String json = Config.getIdentity(this, pkg);
-        if (json == null) json = readIdentityFile(pkg);
+        // 身份读取：统一读取器（配置→内部哨兵→外部哨兵，与 MainHook 生效顺序一致；单点缺失自动回写对齐）
+        String json = readIdentityAll(pkg);
         // 打开详情即视为选中目标应用（同步到模块配置，MainHook 只对目标生效）
         getSharedPreferences("devicereset_ui", MODE_PRIVATE).edit().putString("last_target_pkg", pkg).apply();
         Config.addTargetPackage(this, pkg);
@@ -426,10 +425,8 @@ public class MainActivity extends AppCompatActivity {
             Identity newId = IdentityGenerator.generateRandom();
             IdentityGenerator.fillMissing(newId);
             String rndJson = newId.toJson();
-            // 三写：模块配置（UI 显示）+ 内部哨兵 + 外部哨兵（目标进程可靠读取，666 权限）
-            Config.setIdentity(this, pkg, rndJson);
-            writeIdentityFile(pkg, rndJson);
-            writeExternalIdentityFile(pkg, rndJson);
+            // 统一三写（配置+内部+外部），保证 UI 显示与目标进程生效值一致
+            writeIdentityAll(pkg, rndJson);
             dialog.dismiss();
             refreshAppList();
             // 保存成功后询问是否清空数据（部分应用需清空数据才能立即生效）
@@ -618,10 +615,8 @@ public class MainActivity extends AppCompatActivity {
             // 保存前补齐缺失字段，避免存出空值
             IdentityGenerator.fillMissing(toSave);
             String json = toSave.toJson();
-            // 三写：模块配置（UI 显示）+ 内部哨兵 + 外部哨兵（目标进程可靠读取，666 权限）
-            Config.setIdentity(this, pkg, json);
-            writeIdentityFile(pkg, json);
-            writeExternalIdentityFile(pkg, json);
+            // 统一三写（配置+内部+外部），保证 UI 显示与目标进程生效值一致
+            writeIdentityAll(pkg, json);
             dialog.dismiss();
             refreshAppList();
             // 保存成功后询问是否清空数据（部分应用需清空数据才能立即生效）
@@ -1055,9 +1050,8 @@ public class MainActivity extends AppCompatActivity {
      */
     private boolean clearTargetAppData(String pkg, String identityJson) {
         try {
-            // 1. 确保哨兵存在（内部 + 外部），清数据后依然按当前身份生效
-            writeIdentityFile(pkg, identityJson);
-            writeExternalIdentityFile(pkg, identityJson);
+            // 1. 确保身份三处一致（配置+内部哨兵+外部哨兵），清数据后依然按当前身份生效
+            writeIdentityAll(pkg, identityJson);
             // 2. 强停应用
             String dataDir = "/data/user/0/" + pkg;
             Process su = Runtime.getRuntime().exec("su");
@@ -1193,7 +1187,7 @@ public class MainActivity extends AppCompatActivity {
             }
             dialog.dismiss();
             new Thread(() -> {
-                String json = readIdentityFile(pkg);
+                String json = readIdentityAll(pkg);
                 if (json == null || !json.startsWith("{")) {
                     Identity nid = IdentityGenerator.generateRandom();
                     IdentityGenerator.fillMissing(nid);
@@ -1454,6 +1448,39 @@ public class MainActivity extends AppCompatActivity {
         result.addAll(Config.getTargetPackages(this));
         result.addAll(Config.getIdentityPackages(this));
         return new java.util.ArrayList<>(result);
+    }
+
+    /**
+     * 统一身份写入：模块配置（UI 显示）+ 内部哨兵 + 外部哨兵（目标进程读取），
+     * 保证「显示值 == 实际生效值」。所有写入路径必须走这里。
+     */
+    private void writeIdentityAll(String pkg, String json) {
+        Config.setIdentity(this, pkg, json);
+        writeIdentityFile(pkg, json);
+        writeExternalIdentityFile(pkg, json);
+    }
+
+    /**
+     * 统一身份读取：模块配置 → 内部哨兵 → 外部哨兵（与 MainHook 生效顺序完全一致）。
+     * 单点缺失自动回写对齐：配置有而哨兵缺失 → 补写哨兵；哨兵有而配置缺失 → 回写配置。
+     */
+    private String readIdentityAll(String pkg) {
+        String cfg = Config.getIdentity(this, pkg);
+        if (cfg != null && cfg.startsWith("{")) {
+            // 配置为准；哨兵缺失则静默补写，保证目标进程也能读到同一身份
+            if (readIdentityFile(pkg) == null) {
+                writeIdentityFile(pkg, cfg);
+                writeExternalIdentityFile(pkg, cfg);
+            }
+            return cfg;
+        }
+        String sentinel = readIdentityFile(pkg);
+        if (sentinel != null && sentinel.startsWith("{")) {
+            // 哨兵有而配置缺失 → 回写配置对齐（显示与生效一致）
+            Config.setIdentity(this, pkg, sentinel);
+            return sentinel;
+        }
+        return null;
     }
 
     private String readIdentityFile(String packageName) {
