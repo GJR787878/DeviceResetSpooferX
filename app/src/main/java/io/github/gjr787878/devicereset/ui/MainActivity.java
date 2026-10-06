@@ -384,22 +384,31 @@ public class MainActivity extends AppCompatActivity {
         dot.setVisibility(hasIdentity ? View.VISIBLE : View.INVISIBLE);
         row.addView(dot, new LinearLayout.LayoutParams(Math.round(12 * d), Math.round(12 * d)));
 
-        // 作用域状态：未连接显示「框架未连接」，已连接按全局/精确/未授权三态显示
-        if (scopeLoaded) {
+        // 作用域状态：libxposed 未连接时用数据库真实注入状态兜底显示「已注入✓」，避免误导「框架未连接」
+        if (scopeLoaded || scopeDbLoaded) {
             TextView scopeTv = new TextView(this);
             scopeTv.setTextSize(10);
-            if (!scopeConnected) {
-                scopeTv.setText(t("框架未连接", "No fw", "Нет фрейм"));
-                scopeTv.setTextColor(COLOR_GRAY);
-            } else if (isInScope(pkg)) {
-                if (isGlobalScope()) {
-                    scopeTv.setText(t("作用域✓全局", "Scoped✓global", "В области✓глоб"));
+            if (scopeConnected) {
+                if (isInScope(pkg)) {
+                    if (isGlobalScope()) {
+                        scopeTv.setText(t("作用域✓全局", "Scoped✓global", "В области✓глоб"));
+                    } else {
+                        scopeTv.setText(t("作用域✓", "Scoped✓", "В области✓"));
+                    }
+                    scopeTv.setTextColor(COLOR_BLUE);
                 } else {
-                    scopeTv.setText(t("作用域✓", "Scoped✓", "В области✓"));
+                    scopeTv.setText(t("未授权", "Not scoped", "Не в области"));
+                    scopeTv.setTextColor(COLOR_GRAY);
                 }
+            } else if (scopeDbLoaded && scopeDbEnabled && scopeDbSystem) {
+                // 数据库实证：模块已启用 + 系统框架已勾 = 全局注入生效（真授权机制在线）
+                scopeTv.setText(t("已注入✓", "Injected✓", "Внедрён✓"));
                 scopeTv.setTextColor(COLOR_BLUE);
+            } else if (scopeDbLoaded && scopeDbEnabled) {
+                scopeTv.setText(t("模块已启用", "Module on", "Модуль вкл"));
+                scopeTv.setTextColor(COLOR_GRAY);
             } else {
-                scopeTv.setText(t("未授权", "Not scoped", "Не в области"));
+                scopeTv.setText(t("框架未连接", "No fw", "Нет фрейм"));
                 scopeTv.setTextColor(COLOR_GRAY);
             }
             LinearLayout.LayoutParams scopeLp = new LinearLayout.LayoutParams(
@@ -1425,19 +1434,29 @@ public class MainActivity extends AppCompatActivity {
         lspStatusTv.setText(t("连接中...", "Connecting...", "Подключение..."));
         lspStatusTv.setTextSize(14);
         lspStatusTv.setTextColor(COLOR_GRAY);
-        if (scopeLoaded) {
-            if (!scopeConnected) {
-                lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
-                        "LSPosed: not connected (module disabled or old framework)",
-                        "LSPosed: не подключён (модуль выключен или старая версия фреймворка)"));
-                lspStatusTv.setTextColor(COLOR_GRAY);
-            } else {
+        if (scopeLoaded || scopeDbLoaded) {
+            if (scopeConnected) {
                 lspStatusTv.setText(t("LSPosed 框架：已连接，作用域 ",
                         "LSPosed: connected, scope ",
                         "LSPosed: подключён, область ") + scopeCache.size() + t(" 个应用",
                         " app(s)",
                         " приложений"));
                 lspStatusTv.setTextColor(COLOR_BLUE);
+            } else if (scopeDbLoaded && scopeDbEnabled && scopeDbSystem) {
+                lspStatusTv.setText(t("LSPosed 框架：已注入（全局模式✓，伪装已生效）",
+                        "LSPosed: injected (global scope✓, spoof active)",
+                        "LSPosed: внедрён (глобальная область✓, спуфинг активен)"));
+                lspStatusTv.setTextColor(COLOR_BLUE);
+            } else if (scopeDbLoaded && scopeDbEnabled) {
+                lspStatusTv.setText(t("LSPosed 框架：模块已启用（请勾选系统框架）",
+                        "LSPosed: module enabled (select system framework)",
+                        "LSPosed: модуль включён (выберите системный фреймворк)"));
+                lspStatusTv.setTextColor(COLOR_GRAY);
+            } else {
+                lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
+                        "LSPosed: not connected (module disabled or old framework)",
+                        "LSPosed: не подключён (модуль выключен или старая версия фреймворка)"));
+                lspStatusTv.setTextColor(COLOR_GRAY);
             }
         }
         LinearLayout.LayoutParams lspLp = new LinearLayout.LayoutParams(
@@ -1766,7 +1785,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.9.2 (versionCode 64)\n");
+                devInfo.append("Module Version: 3.9.3 (versionCode 65)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
