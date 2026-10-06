@@ -47,6 +47,18 @@ public class MainActivity extends AppCompatActivity {
     private static final int COLOR_GREEN = 0xFF34C759;
     private static final int COLOR_DIALOG_BG = 0xFF1C1C1E;
 
+    // ===== 选择应用列表缓存（缓存 + 包名集合对比失效）=====
+    // 图标按包名缓存在内存，避免每次打开弹窗都全量解码图标（最慢环节）
+    private static final int ICON_CACHE_SIZE = 600;
+    private static final android.util.LruCache<String, android.graphics.drawable.Drawable> pickerIconCache =
+            new android.util.LruCache<>(ICON_CACHE_SIZE);
+    // 条目缓存（label/pkg/system 轻量数据）与上次扫描的包名集合；包名集合不一致=有新装/卸载 → 重建缓存
+    private static java.util.List<AppEntry> pickerEntryCache = null;
+    private static java.util.Set<String> pickerPkgCache = null;
+    // 图标懒加载线程池（后台解码，不阻塞首屏渲染）
+    private static final java.util.concurrent.ExecutorService pickerIconPool =
+            java.util.concurrent.Executors.newFixedThreadPool(4);
+
     private String currentLang;
     private FrameLayout contentFrame;
     private Button navApps, navSettings;
@@ -1023,23 +1035,34 @@ public class MainActivity extends AppCompatActivity {
             pw.showAsDropDown(btnFilter, 0, Math.round(6 * d));
         });
 
-        // 后台加载全部已安装应用（含图标）
+        // 后台加载全部已安装应用：包名集合比对缓存（秒开），不一致才重建；图标懒加载后台解码
         new Thread(() -> {
             try {
                 final PackageManager pm = getPackageManager();
+                // ① 快速扫描包名集合（毫秒级），用于缓存失效比对
                 final java.util.List<ApplicationInfo> apps = pm.getInstalledApplications(0);
-                final java.util.List<AppEntry> entries = new java.util.ArrayList<>();
-                for (ApplicationInfo ai : apps) {
-                    if (ai.packageName.equals(getPackageName())
-                            || ai.packageName.startsWith("io.github.gjr787878")) continue;
-                    CharSequence l = pm.getApplicationLabel(ai);
-                    android.graphics.drawable.Drawable ic;
-                    try { ic = pm.getApplicationIcon(ai); } catch (Throwable t2) { ic = null; }
-                    boolean isSystem = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-                    entries.add(new AppEntry(l != null && l.length() > 0 ? l.toString() : ai.packageName,
-                            ai.packageName, ic, isSystem));
+                final java.util.Set<String> currentPkgs = new java.util.HashSet<>();
+                for (ApplicationInfo ai : apps) currentPkgs.add(ai.packageName);
+
+                // ② 包名集合一致 → 直接复用条目缓存；不一致（新装/卸载）→ 重建
+                final java.util.List<AppEntry> entries;
+                if (pickerEntryCache != null && currentPkgs.equals(pickerPkgCache)) {
+                    entries = pickerEntryCache;
+                } else {
+                    final java.util.List<AppEntry> rebuilt = new java.util.ArrayList<>();
+                    for (ApplicationInfo ai : apps) {
+                        if (ai.packageName.equals(getPackageName())
+                                || ai.packageName.startsWith("io.github.gjr787878")) continue;
+                        CharSequence l = pm.getApplicationLabel(ai);
+                        boolean isSystem = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+                        rebuilt.add(new AppEntry(l != null && l.length() > 0 ? l.toString() : ai.packageName,
+                                ai.packageName, null, isSystem));
+                    }
+                    java.util.Collections.sort(rebuilt, (a, b) -> a.label.compareToIgnoreCase(b.label));
+                    pickerEntryCache = rebuilt;
+                    pickerPkgCache = currentPkgs;
+                    entries = rebuilt;
                 }
-                java.util.Collections.sort(entries, (a, b) -> a.label.compareToIgnoreCase(b.label));
                 final java.util.Set<String> already = Config.getTargetPackages(this);
                 runOnUiThread(() -> {
                     for (final AppEntry e : entries) {
@@ -1050,9 +1073,30 @@ public class MainActivity extends AppCompatActivity {
                         row.setBackground(new GlassButtonDrawable(20 * d, 1 * d, false));
                         row.setTag(new RowTag((e.label + " " + e.pkg).toLowerCase(), e.system));
 
-                        ImageView ic = new ImageView(this);
+                        final ImageView ic = new ImageView(this);
                         ic.setLayoutParams(new LinearLayout.LayoutParams(Math.round(36 * d), Math.round(36 * d)));
-                        if (e.icon != null) ic.setImageDrawable(e.icon);
+                        // ③ 图标：缓存命中直接显示；未命中先占位，后台线程池解码后填充（不阻塞首屏）
+                        android.graphics.drawable.Drawable cachedIcon = pickerIconCache.get(e.pkg);
+                        if (cachedIcon != null) {
+                            ic.setImageDrawable(cachedIcon);
+                        } else {
+                            GradientDrawable ph = new GradientDrawable();
+                            ph.setColor(0x33FFFFFF);
+                            ph.setCornerRadius(8 * d);
+                            ic.setImageDrawable(ph);
+                            final String fpkg = e.pkg;
+                            try {
+                                pickerIconPool.execute(() -> {
+                                    try {
+                                        android.graphics.drawable.Drawable d2 = pm.getApplicationIcon(fpkg);
+                                        if (d2 != null) {
+                                            pickerIconCache.put(fpkg, d2);
+                                            runOnUiThread(() -> ic.setImageDrawable(d2));
+                                        }
+                                    } catch (Throwable ignored) {}
+                                });
+                            } catch (Throwable ignored) {}
+                        }
                         row.addView(ic);
 
                         LinearLayout tc = new LinearLayout(this);
@@ -1764,7 +1808,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.9.5 (versionCode 67)\n");
+                devInfo.append("Module Version: 3.9.6 (versionCode 68)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
