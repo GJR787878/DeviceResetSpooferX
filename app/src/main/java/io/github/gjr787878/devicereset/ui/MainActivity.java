@@ -173,7 +173,7 @@ public class MainActivity extends AppCompatActivity {
         refreshScopeStatus();
         // 兜底：已连接 libxposed 框架时作用域由 requestScope/removeScope 维护，无需写库；
         // 仅老框架（无 libxposed service）回退 root 写库同步（无目标/非 LSPosed 环境自动跳过，不打扰）
-        if (!LSPosedScopeHelper.isConnected()) autoSyncScopeToLSPosed();
+        // 3.9.2: 不再 root 写 LSPosed 库（全局注入+哨兵即可，避免与手动勾选冲突）
     }
 
     private void buildRootUI() {
@@ -424,7 +424,7 @@ public class MainActivity extends AppCompatActivity {
                         if (LSPosedScopeHelper.isConnected()) {
                             LSPosedScopeHelper.removeScope(pkg);
                         } else {
-                            autoSyncScopeToLSPosed();
+                            // 3.9.2: 哨兵驱动，无需 root 写库
                         }
                         refreshAppList();
                         Toast.makeText(this,
@@ -450,7 +450,7 @@ public class MainActivity extends AppCompatActivity {
         if (LSPosedScopeHelper.isConnected()) {
             LSPosedScopeHelper.requestScope(pkg, scopeEventListener());
         } else {
-            autoSyncScopeToLSPosed();
+            // 3.9.2: 哨兵驱动，无需 root 写库
         }
         Identity id = (json != null && json.startsWith("{")) ? Identity.fromJson(json) : null;
 
@@ -1108,7 +1108,7 @@ public class MainActivity extends AppCompatActivity {
         if (LSPosedScopeHelper.isConnected()) {
             LSPosedScopeHelper.requestScope(pkg, scopeEventListener());
         } else {
-            autoSyncScopeToLSPosed();
+            // 3.9.2: 哨兵驱动，无需 root 写库
         }
         Toast.makeText(this,
                 t("已添加目标应用（可在详情中点击「随机」/「自定义」生成伪装值）", "Target app added (tap Random / Customize in its detail to generate a spoofed identity)", "Приложение добавлено (нажмите «Случайно»/«Настроить» в его деталях, чтобы создать подменённую идентичность)"),
@@ -1766,7 +1766,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.9.1 (versionCode 63)\n");
+                devInfo.append("Module Version: 3.9.2 (versionCode 64)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");

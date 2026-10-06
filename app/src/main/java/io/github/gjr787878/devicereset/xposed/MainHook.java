@@ -38,19 +38,11 @@ public class MainHook implements IXposedHookLoadPackage {
         // 注入探测：本进程被 LSPosed 注入即写 probe 日志（证明全局注入是否覆盖所有进程）
         writeProbeLog(lpparam.packageName);
 
-        // 目标应用过滤（全局注入模式）：模块在 LSPosed 勾「系统框架」后注入所有进程，
-        // 这里按 targets.txt 判断：无目标→不注入任何进程；非目标→跳过，零开销。
-        java.util.Set<String> targets = readTargetsFile();
-        if (targets == null || targets.isEmpty()) {
-            XposedBridge.log("[DeviceReset] no targets configured, skip: " + lpparam.packageName);
-            return;
-        }
-        if (!targets.contains(lpparam.packageName)) {
-            XposedBridge.log("[DeviceReset] skip non-target app: " + lpparam.packageName);
-            return;
-        }
-        XposedBridge.log("[DeviceReset] handleLoadPackage for: " + lpparam.packageName
-                + " (targets=" + targets.size() + ")");
+        // 全局注入模式：模块在 LSPosed 勾「系统框架」后注入所有进程。
+        // 不再用 targets.txt 过滤——目标进程(其他 UID+SELinux appdomain)读不到模块私有目录，
+        // 这是此前「注入了却不生效」的根因（HOOK 空、probe 有）。
+        // 改为哨兵驱动：只有「手动写入过伪装值」的应用（自己目录有 .identity_sentinel，chmod 666）
+        // 才安装 Hook；其余进程快速跳过，零开销。
 
         // 读取模块配置（XSharedPreferences 兜底：开关与身份）
         if (xPrefs == null) {
@@ -118,9 +110,9 @@ public class MainHook implements IXposedHookLoadPackage {
                 }
             }
             if (identity == null) {
+                // 无哨兵 = 未手动写入伪装值 → 不安装任何 Hook（零开销跳过）
                 XposedBridge.log("[DeviceReset] no identity for " + lpparam.packageName
                         + ", skip hooks (identity must be manually triggered in module UI)");
-                writeHookLog(lpparam.packageName, "target hit but NO identity -> skipped");
                 return;
             }
 
