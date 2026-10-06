@@ -1520,41 +1520,10 @@ public class MainActivity extends AppCompatActivity {
         loadHookStates();
 
         // 生效方式
-        addSettingsSection(ll, t("生效方式", "Apply Mode", "Режим"), d);
-        LinearLayout autoRow = new LinearLayout(this);
-        autoRow.setOrientation(LinearLayout.HORIZONTAL);
-        autoRow.setGravity(Gravity.CENTER_VERTICAL);
-        autoRow.setPadding(Math.round(16 * d), Math.round(12 * d), Math.round(16 * d), Math.round(12 * d));
-        final GlassButtonDrawable autoGlass = new GlassButtonDrawable(24 * d, 1 * d, false);
-        autoRow.setBackground(autoGlass);
-        final TextView autoTv = new TextView(this);
-        autoTv.setText(t("保存/随机后自动清空目标应用数据并重启",
-                "Auto-clear target app data & restart after save/random",
-                "Автоочистка данных приложения и перезапуск после сохранения/рандома"));
-        autoTv.setTextSize(15);
-        autoTv.setTextColor(COLOR_WHITE);
-        autoRow.addView(autoTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        final boolean[] autoOn = {isAutoClearAfterSave()};
-        autoTv.setTextColor(autoOn[0] ? COLOR_BLUE : COLOR_WHITE);
-        autoGlass.setGlassSelected(autoOn[0]);
-        autoRow.setOnClickListener(v -> {
-            autoOn[0] = !autoOn[0];
-            getSharedPreferences("devicereset_ui", MODE_PRIVATE)
-                    .edit().putBoolean("auto_clear_after_save", autoOn[0]).apply();
-            autoTv.setTextColor(autoOn[0] ? COLOR_BLUE : COLOR_WHITE);
-            autoGlass.setGlassSelected(autoOn[0]);
-        });
-        ll.addView(autoRow, makeFormLp(d));
 
         // 维护
         addSettingsSection(ll, t("维护", "Maintenance", "Обслуживание"), d);
-        Button btnReset = makeGlassBtn(t("手动重置身份", "Reset Identity (by package)", "Сбросить идентичность"), 15);
-        ll.addView(btnReset, makeFormLp(d));
-        btnReset.setOnClickListener(v -> showResetDialog());
 
-        Button btnClearData = makeGlassBtn(t("清空目标应用数据并重启", "Clear Target App Data & Restart", "Очистить данные приложения и перезапустить"), 15);
-        ll.addView(btnClearData, makeFormLp(d));
-        btnClearData.setOnClickListener(v -> showClearDataDialog());
 
         Button btnAbout = makeGlassBtn(t("关于", "About", "О программе"), 15);
         ll.addView(btnAbout, makeFormLp(d));
@@ -1571,20 +1540,17 @@ public class MainActivity extends AppCompatActivity {
                   "2. 重启手机（必须重启）\n" +
                   "3. 在「应用」页点击「＋ 选择应用」可直接添加任意已安装应用为目标\n" +
                   "4. 打开目标应用详情 → 点击「随机」或「自定义」→ 保存（手动触发）\n" +
-                  "5. 保存/随机后显示「修改成功」，重新打开目标应用即按伪装身份生效\n" +
-                  "6. 也可在「维护」中手动「清空目标应用数据并重启」",
+                  "5. 保存/随机后显示「修改成功」，重新打开目标应用即按伪装身份生效",
                   "1. LSPosed Manager -> Modules -> Enable this module -> Check target apps in Scope\n" +
                   "2. Reboot phone (required)\n" +
                   "3. Use \"+ Select App (All Apps)\" on the Apps tab to add any installed app as target\n" +
                   "4. Open target app -> tap Random / Customize -> Save (manual trigger)\n" +
-                  "5. After save/random you'll see \"Saved\"; reopen the target app and the spoofed identity applies\n" +
-                  "6. You can also use \"Clear Target App Data & Restart\" in Maintenance",
+                  "5. After save/random you'll see \"Saved\"; reopen the target app and the spoofed identity applies",
                   "1. LSPosed Manager -> Модули -> Включить модуль -> Отметить целевые приложения\n" +
                   "2. Перезагрузите телефон (обязательно)\n" +
                   "3. Во вкладке «Приложения» используйте «+ Выбрать приложение (все)»\n" +
                   "4. Откройте приложение -> нажмите «Случайно»/«Настроить» -> Сохранить (ручной запуск)\n" +
-                  "5. После сохранения появится «Сохранено»; повторно откройте приложение, и подменённая идентичность применится\n" +
-                  "6. Также можно вручную «Очистить данные приложения и перезапустить» в разделе «Обслуживание»"), d);
+                  "5. После сохранения появится «Сохранено»; повторно откройте приложение, и подменённая идентичность применится"), d);
 
         addInfoBlock(ll, t("工作原理", "How It Works", "Как это работает"),
                 t("模块将手动生成的伪装身份保存在模块自身配置中（无需Root）。在目标应用详情中点击「随机」或「自定义」并保存后，目标应用下次启动时模块按该身份进行伪装；未手动设置的应用保持真实值。旧版哨兵文件仍会被兼容读取。",
@@ -1785,7 +1751,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.9.3 (versionCode 65)\n");
+                devInfo.append("Module Version: 3.9.4 (versionCode 66)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
