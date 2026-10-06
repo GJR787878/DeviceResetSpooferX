@@ -44,6 +44,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int COLOR_WHITE = 0xFFFFFFFF;
     private static final int COLOR_BLUE = 0xFF0A84FF;
     private static final int COLOR_GRAY = 0xFFCCCCCC;
+    private static final int COLOR_GREEN = 0xFF34C759;
     private static final int COLOR_DIALOG_BG = 0xFF1C1C1E;
 
     private String currentLang;
@@ -123,12 +124,12 @@ public class MainActivity extends AppCompatActivity {
                         lspStatusTv.setText(t("LSPosed 框架：已注入（作用域已自动同步✓，重启后全部生效）",
                                 "LSPosed: injected (scope auto-synced✓, reboot to apply all)",
                                 "LSPosed: внедрён (область авто-синхр✓, перезагрузка для применения)"));
-                        lspStatusTv.setTextColor(COLOR_BLUE);
+                        lspStatusTv.setTextColor(COLOR_GREEN);
                     } else if (scopeDbLoaded && scopeDbEnabled && scopeDbSystem) {
                         lspStatusTv.setText(t("LSPosed 框架：已注入（全局模式✓）",
                                 "LSPosed: injected (global scope✓)",
                                 "LSPosed: внедрён (глобальная область✓)"));
-                        lspStatusTv.setTextColor(COLOR_BLUE);
+                        lspStatusTv.setTextColor(COLOR_GREEN);
                     } else {
                         lspStatusTv.setText(t("LSPosed 框架：未连接（模块未启用或框架过旧）",
                                 "LSPosed: not connected (module disabled or old framework)",
@@ -403,7 +404,7 @@ public class MainActivity extends AppCompatActivity {
             } else if (scopeDbLoaded && scopeDbEnabled && scopeDbSystem) {
                 // 数据库实证：模块已启用 + 系统框架已勾 = 全局注入生效（真授权机制在线）
                 scopeTv.setText(t("已注入✓", "Injected✓", "Внедрён✓"));
-                scopeTv.setTextColor(COLOR_BLUE);
+                scopeTv.setTextColor(COLOR_GREEN);
             } else if (scopeDbLoaded && scopeDbEnabled) {
                 scopeTv.setText(t("模块已启用", "Module on", "Модуль вкл"));
                 scopeTv.setTextColor(COLOR_GRAY);
@@ -1446,7 +1447,7 @@ public class MainActivity extends AppCompatActivity {
                 lspStatusTv.setText(t("LSPosed 框架：已注入（全局模式✓，伪装已生效）",
                         "LSPosed: injected (global scope✓, spoof active)",
                         "LSPosed: внедрён (глобальная область✓, спуфинг активен)"));
-                lspStatusTv.setTextColor(COLOR_BLUE);
+                lspStatusTv.setTextColor(COLOR_GREEN);
             } else if (scopeDbLoaded && scopeDbEnabled) {
                 lspStatusTv.setText(t("LSPosed 框架：模块已启用（请勾选系统框架）",
                         "LSPosed: module enabled (select system framework)",
@@ -1536,26 +1537,38 @@ public class MainActivity extends AppCompatActivity {
         // 说明文字（原首页内容）
         addSettingsSection(ll, t("使用方法", "Usage", "Использование"), d);
         addInfoBlock(ll, t("使用方法", "How to use", "Как использовать"),
-                t("1. LSPosed管理器 → 模块 → 启用本模块 → 作用域勾选目标应用\n" +
-                  "2. 重启手机（必须重启）\n" +
-                  "3. 在「应用」页点击「＋ 选择应用」可直接添加任意已安装应用为目标\n" +
-                  "4. 打开目标应用详情 → 点击「随机」或「自定义」→ 保存（手动触发）\n" +
-                  "5. 保存/随机后显示「修改成功」，重新打开目标应用即按伪装身份生效",
-                  "1. LSPosed Manager -> Modules -> Enable this module -> Check target apps in Scope\n" +
-                  "2. Reboot phone (required)\n" +
-                  "3. Use \"+ Select App (All Apps)\" on the Apps tab to add any installed app as target\n" +
-                  "4. Open target app -> tap Random / Customize -> Save (manual trigger)\n" +
-                  "5. After save/random you'll see \"Saved\"; reopen the target app and the spoofed identity applies",
-                  "1. LSPosed Manager -> Модули -> Включить модуль -> Отметить целевые приложения\n" +
-                  "2. Перезагрузите телефон (обязательно)\n" +
-                  "3. Во вкладке «Приложения» используйте «+ Выбрать приложение (все)»\n" +
-                  "4. Откройте приложение -> нажмите «Случайно»/«Настроить» -> Сохранить (ручной запуск)\n" +
-                  "5. После сохранения появится «Сохранено»; повторно откройте приложение, и подменённая идентичность применится"), d);
+                t("1. 首次安装：LSPosed → 模块 → 启用本模块（「系统框架」已自动预勾选）→ 重启手机一次\n" +
+                  "2. 之后无需再打开 LSPosed 管理器\n" +
+                  "3. 在「应用」页点击「＋ 选择应用」添加任意已安装应用为目标\n" +
+                  "4. 打开目标应用详情 → 点击「随机」或「自定义」→ 保存（手动触发写入）\n" +
+                  "5. 显示「修改成功」后，直接打开目标应用即按伪装身份生效，无需重启\n" +
+                  "6. 若目标应用仍读到旧值，保存后选择「清空所有数据」再打开该应用",
+                  "1. First install: LSPosed -> Modules -> Enable this module (\"System Framework\" is pre-checked) -> reboot once\n" +
+                  "2. Afterwards, no need to open LSPosed Manager again\n" +
+                  "3. Tap \"+ Select App\" on the Apps tab to add any installed app as target\n" +
+                  "4. Open the target app's detail -> tap Random / Customize -> Save (manual trigger)\n" +
+                  "5. You'll see \"Saved\"; just reopen the target app and the spoofed identity applies, no reboot needed\n" +
+                  "6. If the target app still reads old values, choose \"Clear all data\" after saving and reopen the app",
+                  "1. Первая установка: LSPosed -> Модули -> Включить модуль («Системный фреймворк» уже отмечен) -> перезагрузить один раз\n" +
+                  "2. Далее открывать LSPosed Manager больше не нужно\n" +
+                  "3. На вкладке «Приложения» нажмите «+ Выбрать приложение», чтобы добавить любое установленное приложение\n" +
+                  "4. Откройте детали приложения -> «Случайно»/«Настроить» -> Сохранить (ручная запись)\n" +
+                  "5. Появится «Сохранено»; просто откройте приложение снова — подменённая идентичность применится, перезагрузка не нужна\n" +
+                  "6. Если приложение всё ещё читает старые значения, выберите «Очистить все данные» после сохранения и откройте его заново"), d);
 
         addInfoBlock(ll, t("工作原理", "How It Works", "Как это работает"),
-                t("模块将手动生成的伪装身份保存在模块自身配置中（无需Root）。在目标应用详情中点击「随机」或「自定义」并保存后，目标应用下次启动时模块按该身份进行伪装；未手动设置的应用保持真实值。旧版哨兵文件仍会被兼容读取。",
-                "The module stores the manually generated spoofed identity in its own config (no root needed). After you tap Random / Customize and save in a target app's detail dialog, the module applies that identity when the target app launches next. Apps without a manually set identity keep their real values. Legacy sentinel files are still read for compatibility.",
-                "Модуль хранит вручную созданную подменённую идентичность в собственной конфигурации (Root не нужен). После нажатия «Случайно»/«Настроить» и сохранения в диалоге приложения модуль применяет её при следующем запуске. Приложения без ручной настройки сохраняют реальные значения. Старые файлы-sentinel по-прежнему читаются для совместимости."), d);
+                t("• 伪装身份保存在模块配置中，并在「保存/随机」时写入目标应用自己的私有目录（哨兵文件，应用可读）\n" +
+                  "• 模块经「系统框架」全局注入所有进程；目标应用启动时读到自己的哨兵身份即安装 Hook，未写入的应用零开销跳过\n" +
+                  "• 因此只有手动写入过伪装值的应用才生效（手动触发），无需在 LSPosed 中勾选目标应用\n" +
+                  "• 清除应用数据会删除哨兵 → 该应用恢复真实值，需重新写入",
+                  "• The spoofed identity is stored in the module config and written to the target app's own private dir (sentinel file, readable by the app) on Save/Random\n" +
+                  "• The module injects every process via the System Framework; when a target app starts, it reads its own sentinel identity and installs hooks; apps without a sentinel are skipped with zero overhead\n" +
+                  "• So only apps you manually wrote a spoofed identity for are affected (manual trigger) — no need to check target apps in LSPosed\n" +
+                  "• Clearing app data deletes the sentinel -> the app returns to real values and needs a new write",
+                  "• Подменённая идентичность хранится в конфигурации модуля и при «Сохранить/Случайно» записывается в собственный приватный каталог приложения (файл-sentinel, читаемый приложением)\n" +
+                  "• Модуль внедряется во все процессы через «Системный фреймворк»; при запуске приложение читает свою идентичность-sentinel и устанавливает хуки; приложения без sentinel пропускаются без затрат\n" +
+                  "• Поэтому действуют только приложения, для которых вы вручную записали подменённую идентичность (ручной запуск) — отмечать их в LSPosed не нужно\n" +
+                  "• Очистка данных приложения удаляет sentinel -> приложение возвращается к реальным значениям, нужна новая запись"), d);
 
         addInfoBlock(ll, t("伪装的识别码", "Spoofed Identifiers", "Подменяемые идентификаторы"),
                 t("• Android ID (SSAID)\n• 广告ID (AAID) / AppSet ID\n• IMEI / MEID / IMSI / ICCID\n• 序列号 / MAC地址\n• GSF ID\n• 设备型号：品牌、型号、厂商、Build指纹\n• 运营商信息：代码、名称、国家",
@@ -1563,9 +1576,9 @@ public class MainActivity extends AppCompatActivity {
                 "• Android ID (SSAID)\n• Рекламный ID (AAID) / AppSet ID\n• IMEI / MEID / IMSI / ICCID\n• Серийный номер / MAC-адрес\n• GSF ID\n• Устройство: бренд, модель, производитель, отпечаток Build\n• Оператор: код, название, страна"), d);
 
         addInfoBlock(ll, t("注意事项", "Warnings", "Предупреждения"),
-                t("• 本模块仅用于个人隐私保护和技术测试\n• 部分应用会检测Xposed/Root痕迹，存在账号封禁风险\n• 加壳应用请在LSPosed作用域设置中勾选「排除资源钩子」\n• native层直接读取系统属性的应用，Java层Hook无法拦截\n• 建议先在不重要的应用上测试\n• 排查问题：LSPosed → 日志 → 搜索「DeviceReset」",
-                "• For personal privacy protection and technical testing only\n• Some apps detect Xposed/Root traces, account ban risk exists\n• For packed apps, enable \"Exclude resource hooks\" in LSPosed scope\n• Native-layer system property reads cannot be intercepted by Java hooks\n• Test on non-critical apps first\n• Troubleshooting: LSPosed -> Logs -> Search \"DeviceReset\"",
-                "• Только для защиты личной конфиденциальности и технического тестирования\n• Некоторые приложения обнаруживают следы Xposed/Root, существует риск блокировки\n• Для упакованных приложений включите «Исключить хуки ресурсов»\n• Нативные чтения системных свойств не могут быть перехвачены Java-хуками\n• Сначала тестируйте на некритичных приложениях\n• Устранение неполадок: LSPosed -> Журналы -> Поиск «DeviceReset»"), d);
+                t("• 本模块仅用于个人隐私保护和技术测试\n• 部分应用会检测Xposed/Root痕迹，存在账号封禁风险\n• 保存后若应用仍读到旧值，请「清空所有数据」后重新打开（部分应用缓存了旧身份）\n• native层直接读取系统属性的应用，Java层Hook无法拦截\n• 建议先在不重要的应用上测试\n• 排查问题：设置页 →「导出诊断日志」→ 将压缩包发送给开发者",
+                "• For personal privacy protection and technical testing only\n• Some apps detect Xposed/Root traces, account ban risk exists\n• If the app still reads old values after saving, choose \"Clear all data\" and reopen it (some apps cache the old identity)\n• Native-layer system property reads cannot be intercepted by Java hooks\n• Test on non-critical apps first\n• Troubleshooting: Settings -> \"Export Diagnostic Log\" -> send the archive to the developer",
+                "• Только для защиты личной конфиденциальности и технического тестирования\n• Некоторые приложения обнаруживают следы Xposed/Root, существует риск блокировки\n• Если после сохранения приложение читает старые значения, выберите «Очистить все данные» и откройте заново (некоторые приложения кэшируют старую идентичность)\n• Нативные чтения системных свойств не могут быть перехвачены Java-хуками\n• Сначала тестируйте на некритичных приложениях\n• Устранение неполадок: Настройки -> «Экспорт диагностического журнала» -> отправьте архив разработчику"), d);
 
         sv.addView(ll);
         return sv;
@@ -1751,7 +1764,7 @@ public class MainActivity extends AppCompatActivity {
                 devInfo.append("Build ID: ").append(android.os.Build.ID).append("\n");
                 devInfo.append("Android Version: ").append(android.os.Build.VERSION.RELEASE).append("\n");
                 devInfo.append("SDK Level: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
-                devInfo.append("Module Version: 3.9.4 (versionCode 66)\n");
+                devInfo.append("Module Version: 3.9.5 (versionCode 67)\n");
                 devInfo.append("Language: ").append(currentLang).append("\n");
                 // Root 状态
                 devInfo.append("\n=== Root Status ===\n");
@@ -1846,7 +1859,8 @@ public class MainActivity extends AppCompatActivity {
                 lsp.append("=== LSPosed Status ===\n");
                 lsp.append("Module package: io.github.gjr787878.devicereset\n");
                 lsp.append("Note: If no apps found with sentinel files, the module may not be enabled in LSPosed Manager.\n");
-                lsp.append("Please check: LSPosed Manager -> Modules -> DeviceResetSpooferX -> Enabled -> Scope -> select target apps -> Reboot\n");
+                lsp.append("Check: LSPosed -> Modules -> DeviceResetSpooferX enabled (System Framework pre-checked) -> reboot once; then Save/Random in module UI for the target app.\n");
+                lsp.append("Expected in scan_result: HOOKED lines with 'ALL hooks installed, identity source=sentinel'.\n");
                 try {
                     Process su = Runtime.getRuntime().exec("su");
                     java.io.DataOutputStream os = new java.io.DataOutputStream(su.getOutputStream());
@@ -2060,9 +2074,9 @@ public class MainActivity extends AppCompatActivity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("DeviceResetSpooferX")
-                .setMessage(t("版本：3.7.0\n\n手动生成并保存设备伪装身份的LSPosed模块。\n\n在目标应用详情中点击「随机」或「自定义」保存后，重新打开目标应用即生效。\n支持中文 / English / Русский",
-                        "Version: 3.7.0\n\nLSPosed module that manually generates and saves spoofed device identity.\n\nTap Random / Customize in a target app's detail and save; it takes effect after reopening the app.\nSupports Chinese / English / Russian",
-                        "Версия: 3.7.0\n\nМодуль LSPosed для ручного создания и сохранения подменённой идентичности устройства.\n\nНажмите «Случайно»/«Настроить» в деталях приложения и сохраните; вступит в силу после повторного открытия.\nПоддерживает 中文 / English / Русский"))
+                .setMessage(t("版本：3.9.5\n\n免开 LSPosed 管理器的设备伪装模块。\n\n在「应用」页添加目标 → 打开详情 →「随机」或「自定义」→ 保存（手动触发）→ 直接打开目标应用即生效。\n支持中文 / English / Русский",
+                        "Version: 3.9.5\n\nDevice spoofing module that works without opening the LSPosed Manager.\n\nAdd a target on the Apps tab -> open its detail -> Random / Customize -> Save (manual trigger) -> just reopen the app and it applies.\nSupports Chinese / English / Russian",
+                        "Версия: 3.9.5\n\nМодуль подмены устройства, работающий без открытия LSPosed Manager.\n\nДобавьте приложение на вкладке «Приложения» -> откройте детали -> «Случайно»/«Настроить» -> Сохранить (ручной запуск) -> просто откройте приложение снова, и оно применится.\nПоддерживает 中文 / English / Русский"))
                 .setPositiveButton(t("确定", "OK", "ОК"), null)
                 .show();
     }
